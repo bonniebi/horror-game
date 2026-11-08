@@ -178,6 +178,7 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -195,6 +196,9 @@ const flashlight = new THREE.SpotLight(0xffeccc, 24, 26, 0.55, 0.85, 1.4);
 flashlight.position.set(0.22, -0.18, 0.1);
 flashlight.target.position.set(0.05, -0.05, -1);
 camera.add(flashlight, flashlight.target);
+// 손전등 그림자: 괴물과 기둥의 그림자가 벽에 길게 드리운다
+flashlight.castShadow = true; flashlight.shadow.mapSize.set(1024, 1024);
+flashlight.shadow.camera.near = 0.15; flashlight.shadow.camera.far = 26; flashlight.shadow.bias = -0.0006; flashlight.shadow.normalBias = 0.02;
 // 아주 약한 주변광(손전등을 꺼도 바로 앞은 겨우 보이게)
 const nearGlow = new THREE.PointLight(0x6a6a88, 0.28, 4, 1.5);
 camera.add(nearGlow);
@@ -218,6 +222,14 @@ const postMat = new THREE.ShaderMaterial({
       uv += vec2(sin(uv.y * 28.0 + uTime * 6.0), cos(uv.x * 22.0 + uTime * 4.0)) * 0.002 * uFear;
       float ab = 0.004 + uFear * 0.02 + uGlitch * 0.05;
       vec4 col = vec4(texture2D(tDiffuse, uv + c * ab).r, texture2D(tDiffuse, uv).g, texture2D(tDiffuse, uv - c * ab).b, 1.0);
+      // 빛 번짐: 밝은 부분(전등, 눈빛, 비상구 표시)이 안개 속에서 번진다
+      vec3 glow = vec3(0.0);
+      for (int i = 0; i < 12; i++) {
+        float a = float(i) * 0.5236 + 0.3, r = (i < 6 ? 5.0 : 13.0) + float(i);
+        vec3 sm = texture2D(tDiffuse, uv + vec2(cos(a), sin(a)) * r / uRes).rgb;
+        glow += max(sm - 0.75, 0.0);
+      }
+      col.rgb += glow * 0.07;
       gl_FragColor = col;
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
@@ -232,6 +244,29 @@ const postMat = new THREE.ShaderMaterial({
   depthTest: false, depthWrite: false
 });
 const postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat); postQuad.frustumCulled = false; postScene.add(postQuad);
+
+// 손전등 빛 속에 떠다니는 먼지
+const DUST_N = 700, dustGeo = new THREE.BufferGeometry();
+{ const P = new Float32Array(DUST_N * 3), A = new Float32Array(DUST_N);
+  for (let i = 0; i < DUST_N; i++) { P[i * 3] = rand(0, 10); P[i * 3 + 1] = rand(0, 10); P[i * 3 + 2] = rand(0, 10); A[i] = Math.random(); }
+  dustGeo.setAttribute('position', new THREE.BufferAttribute(P, 3)); dustGeo.setAttribute('aSeed', new THREE.BufferAttribute(A, 1)); }
+const dustMat = new THREE.ShaderMaterial({
+  uniforms: { uCam: { value: new THREE.Vector3() }, uFlash: { value: 1 }, uTime: { value: 0 }, uScale: { value: 1 } },
+  vertexShader: `
+    uniform vec3 uCam; uniform float uFlash, uTime, uScale; attribute float aSeed; varying float vA;
+    void main(){
+      vec3 drift = vec3(sin(uTime * 0.13 + aSeed * 40.0) * 0.6, -uTime * 0.035 * (0.5 + aSeed), cos(uTime * 0.11 + aSeed * 31.0) * 0.6);
+      vec3 p = uCam + mod(position + drift - uCam, 10.0) - 5.0;
+      vec4 mv = modelViewMatrix * vec4(p, 1.0); float d = length(mv.xyz);
+      float cone = smoothstep(0.86, 0.975, dot(normalize(mv.xyz), normalize(vec3(0.05, -0.04, -1.0))));
+      vA = cone * uFlash * smoothstep(9.0, 0.8, d) * smoothstep(0.15, 0.6, d) * (0.45 + 0.55 * sin(uTime * 1.7 + aSeed * 50.0));
+      gl_PointSize = max(1.0, (1.0 + aSeed * 1.6) * uScale * 4.5 / max(d, 0.3));
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `varying float vA; void main(){ float r = length(gl_PointCoord - 0.5); if (r > 0.5) discard; gl_FragColor = vec4(1.0, 0.93, 0.8, vA * 0.8 * smoothstep(0.5, 0.0, r)); }`,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+});
+const dust = new THREE.Points(dustGeo, dustMat); dust.frustumCulled = false; scene.add(dust);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -273,67 +308,107 @@ function drips(g, s, n, rgb, top = 0) {
     g.fillStyle = gr; g.fillRect(x, y, 1 + Math.random() * 3, len);
   }
 }
-function drawWall(g, s, bloody) {
-  g.fillStyle = '#6a6e62'; g.fillRect(0, 0, s, s);
-  g.fillStyle = '#485046'; g.fillRect(0, s * 0.62, s, s * 0.38);       // 아래쪽 페인트
-  g.fillStyle = '#2b2e28'; g.fillRect(0, s * 0.6, s, 5);                // 몰딩
-  speckle(g, s, 0.08, 7000);
-  stains(g, s, 16, 'rgba(45,32,14,.35)');
-  drips(g, s, 22, '30,22,10');
-  g.strokeStyle = 'rgba(18,18,16,.6)'; g.lineWidth = 1;
-  for (let i = 0; i < 6; i++) {
+// 캔버스 하나로 색 + 요철(bump) + 거칠기(roughness)까지
+function texSet(size, drawColor, drawRough, rx = 1, ry = rx) {
+  const map = canvasTex(size, drawColor, rx, ry);
+  const bump = new THREE.CanvasTexture(map.image); bump.wrapS = bump.wrapT = THREE.RepeatWrapping; bump.repeat.set(rx, ry);
+  const rough = drawRough ? canvasTex(size, drawRough, rx, ry) : null;
+  if (rough) rough.colorSpace = THREE.NoColorSpace;
+  return { map, bump, rough };
+}
+function crackLines(g, s, n, col, w, len = 9, step = 30) {
+  g.strokeStyle = col; g.lineWidth = w;
+  for (let i = 0; i < n; i++) {
     let x = Math.random() * s, y = Math.random() * s; g.beginPath(); g.moveTo(x, y);
-    for (let j = 0; j < 9; j++) { x += (Math.random() - .5) * 30; y += Math.random() * 18; g.lineTo(x, y); }
+    for (let j = 0; j < len; j++) { x += (Math.random() - .5) * step; y += (Math.random() - .3) * step * 0.6; g.lineTo(x, y); }
     g.stroke();
   }
-  // 벗겨진 페인트
-  for (let i = 0; i < 6; i++) {
-    g.fillStyle = 'rgba(150,150,135,.25)';
-    g.beginPath(); const x = Math.random() * s, y = Math.random() * s;
-    g.ellipse(x, y, 4 + Math.random() * 14, 3 + Math.random() * 8, Math.random() * 3, 0, Math.PI * 2); g.fill();
+}
+function drawWall(g, s, bloody) {
+  // 위: 곰팡이 핀 페인트와 회반죽
+  const up = g.createLinearGradient(0, 0, 0, s * 0.55); up.addColorStop(0, '#4f5249'); up.addColorStop(1, '#6b6f62');
+  g.fillStyle = up; g.fillRect(0, 0, s, s * 0.56);
+  speckle(g, s, 0.07, 14000);
+  stains(g, s, 22, 'rgba(45,32,14,.35)');
+  stains(g, s, 8, 'rgba(25,32,18,.45)', .2);                              // 곰팡이
+  drips(g, s, 34, '38,24,10');                                            // 녹물 자국
+  for (let i = 0; i < 9; i++) {                                           // 벗겨진 페인트 (들쭉날쭉한 조각, 밑의 회반죽이 드러난다)
+    const cx = rand(0, s), cy = rand(0, s * 0.5), R = rand(6, 26);
+    g.beginPath();
+    for (let k = 0; k < 14; k++) { const a = (k / 14) * Math.PI * 2, r = R * rand(0.4, 1.3); g[k ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * r * 1.4, cy + Math.sin(a) * r); }
+    g.closePath(); g.fillStyle = 'rgba(128,122,104,.35)'; g.fill(); g.strokeStyle = 'rgba(25,22,16,.45)'; g.lineWidth = 1; g.stroke();
   }
-  const gr = g.createLinearGradient(0, s * .78, 0, s);
-  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(8,6,4,.75)');
-  g.fillStyle = gr; g.fillRect(0, s * .78, s, s * .22);
+  // 아래: 금 가고 떨어져 나간 병원 타일
+  const ty = s * 0.58, th = (s - ty) / 6, tw = s / 8;
+  g.fillStyle = '#23241f'; g.fillRect(0, ty, s, s - ty);                 // 줄눈
+  for (let r = 0; r < 6; r++) for (let c = 0; c < 8; c++) {
+    if (Math.random() < 0.06) continue;                                     // 빠진 타일
+    const v = 120 + rand(-14, 10), tint = Math.random() < 0.5 ? 6 : 0;
+    g.fillStyle = `rgb(${v - 12 + tint},${v},${v - 8})`; g.fillRect(c * tw + 2, ty + r * th + 2, tw - 4, th - 4);
+    const hl = g.createLinearGradient(0, ty + r * th, 0, ty + (r + 1) * th); hl.addColorStop(0, 'rgba(255,255,240,.12)'); hl.addColorStop(1, 'rgba(0,0,0,.18)');
+    g.fillStyle = hl; g.fillRect(c * tw + 2, ty + r * th + 2, tw - 4, th - 4);
+  }
+  g.fillStyle = '#1d1e1a'; g.fillRect(0, ty - 7, s, 9);                  // 몰딩
+  crackLines(g, s, 10, 'rgba(15,14,12,.75)', 1.2);
+  stains(g, s, 10, 'rgba(30,22,10,.4)', .3);
+  const gr = g.createLinearGradient(0, s * .8, 0, s);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(8,6,4,.85)');
+  g.fillStyle = gr; g.fillRect(0, s * .8, s, s * .2);
   if (bloody) {
-    // 피 묻은 손자국/얼룩
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 3; i++) {                                          // 피 묻은 손자국
       const x = rand(s * .15, s * .85), y = rand(s * .25, s * .7);
       g.fillStyle = 'rgba(95,6,6,.85)';
-      g.beginPath(); g.ellipse(x, y, 11, 13, 0, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.ellipse(x, y, 20, 24, 0, 0, Math.PI * 2); g.fill();
       for (let f = 0; f < 5; f++) {
         const a = -Math.PI / 2 + (f - 2) * 0.38 + (f === 0 ? 0.5 : 0);
-        g.beginPath(); g.ellipse(x + Math.cos(a) * 18, y + Math.sin(a) * 18, 3.2, 7, a + Math.PI / 2, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.ellipse(x + Math.cos(a) * 34, y + Math.sin(a) * 34, 6, 13, a + Math.PI / 2, 0, Math.PI * 2); g.fill();
       }
-      drips(g, s, 6, '90,4,4', y);
+      drips(g, s, 8, '90,4,4', y);
     }
-    g.strokeStyle = 'rgba(85,5,5,.75)'; g.lineWidth = 9; g.lineCap = 'round';
+    g.strokeStyle = 'rgba(85,5,5,.75)'; g.lineWidth = 16; g.lineCap = 'round';  // 무언가를 끌고 간 자국
     g.beginPath(); g.moveTo(rand(0, s * .3), rand(s * .3, s * .5));
     g.bezierCurveTo(s * .4, rand(s * .2, s * .6), s * .6, rand(s * .3, s * .7), rand(s * .7, s), rand(s * .4, s * .6)); g.stroke();
   }
 }
-const wallMat = new THREE.MeshStandardMaterial({ map: canvasTex(256, (g, s) => drawWall(g, s, false)), roughness: 0.92 });
-const bloodWallMat = new THREE.MeshStandardMaterial({ map: canvasTex(256, (g, s) => drawWall(g, s, true)), roughness: 0.9 });
-const floorTex = canvasTex(256, (g, s) => {
-  g.fillStyle = '#3c3a35'; g.fillRect(0, 0, s, s);
+const wallRough = (g, s) => { g.fillStyle = '#e6e6e6'; g.fillRect(0, 0, s, s); g.fillStyle = '#7a7a7a'; g.fillRect(0, s * 0.58, s, s * 0.42); stains(g, s, 10, 'rgba(60,60,60,.6)', .2); };
+const wT = texSet(512, (g, s) => drawWall(g, s, false), wallRough), bT = texSet(512, (g, s) => drawWall(g, s, true), wallRough);
+const wallMat = new THREE.MeshStandardMaterial({ map: wT.map, bumpMap: wT.bump, bumpScale: 2.2, roughnessMap: wT.rough, roughness: 1 });
+const bloodWallMat = new THREE.MeshStandardMaterial({ map: bT.map, bumpMap: bT.bump, bumpScale: 2.2, roughnessMap: bT.rough, roughness: 1 });
+// 바닥: 깨진 타일, 줄눈의 때, 고인 물웅덩이(반짝인다), 핏자국
+const puddles = Array.from({ length: 4 }, () => [rand(40, 470), rand(40, 470), rand(30, 80), rand(20, 50), rand(0, 3)]);
+const fT = texSet(512, (g, s) => {
+  g.fillStyle = '#1f1d19'; g.fillRect(0, 0, s, s);
   const n = 4, w = s / n;
   for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
-    const v = 92 + Math.random() * 30, c = (i + j) % 2 ? v : v - 22;
-    g.fillStyle = `rgb(${c},${c - 4},${c - 10})`; g.fillRect(i * w + 2, j * w + 2, w - 4, w - 4);
+    const v = 92 + Math.random() * 30, c = (i + j) % 2 ? v : v - 26;
+    g.fillStyle = `rgb(${c},${c - 4},${c - 11})`; g.fillRect(i * w + 3, j * w + 3, w - 6, w - 6);
+    if (Math.random() < 0.3) { g.strokeStyle = 'rgba(10,9,8,.85)'; g.lineWidth = 2; g.beginPath(); g.moveTo(i * w + rand(0, w), j * w + 3); g.lineTo(i * w + rand(0, w), j * w + rand(w * .3, w)); g.lineTo(i * w + w - 3, j * w + rand(0, w)); g.stroke(); }
   }
-  speckle(g, s, 0.1, 6000);
-  stains(g, s, 12, 'rgba(30,22,10,.45)', .3);
-  stains(g, s, 2, 'rgba(70,5,5,.35)', .15);
+  speckle(g, s, 0.1, 16000);
+  stains(g, s, 18, 'rgba(30,22,10,.5)', .3);
+  for (const [x, y, rx, ry, a] of puddles) { g.fillStyle = 'rgba(12,12,10,.55)'; g.beginPath(); g.ellipse(x, y, rx, ry, a, 0, Math.PI * 2); g.fill(); }
+  stains(g, s, 2, 'rgba(70,5,5,.45)', .15);
+}, (g, s) => {
+  g.fillStyle = '#c8c8c8'; g.fillRect(0, 0, s, s);
+  for (const [x, y, rx, ry, a] of puddles) { g.fillStyle = '#141414'; g.beginPath(); g.ellipse(x, y, rx, ry, a, 0, Math.PI * 2); g.fill(); }
 }, GW + 2);
-const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.8 });
-const ceilMat = new THREE.MeshStandardMaterial({
-  map: canvasTex(256, (g, s) => {
-    g.fillStyle = '#4a4a46'; g.fillRect(0, 0, s, s);
-    g.strokeStyle = '#2a2a28'; g.lineWidth = 3;
-    for (let i = 0; i <= 2; i++) { g.beginPath(); g.moveTo(i * s / 2, 0); g.lineTo(i * s / 2, s); g.moveTo(0, i * s / 2); g.lineTo(s, i * s / 2); g.stroke(); }
-    speckle(g, s, 0.1, 5000); stains(g, s, 14, 'rgba(40,30,12,.5)', .3);
-  }, (GW + 2) / 2), roughness: 1
-});
+const floorTex = fT.map;
+const floorMat = new THREE.MeshStandardMaterial({ map: fT.map, bumpMap: fT.bump, bumpScale: 1.6, roughnessMap: fT.rough, roughness: 1, metalness: 0.05 });
+// 천장: 물에 젖어 처진 석고 패널, 빠진 칸 사이로 보이는 어둠
+const cT = texSet(512, (g, s) => {
+  g.fillStyle = '#4a4943'; g.fillRect(0, 0, s, s);
+  const n = 4, w = s / n;
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    if (Math.random() < 0.08) { g.fillStyle = '#050505'; g.fillRect(i * w, j * w, w, w); continue; }
+    const v = 70 + rand(-8, 8); g.fillStyle = `rgb(${v},${v - 2},${v - 8})`; g.fillRect(i * w + 3, j * w + 3, w - 6, w - 6);
+    for (let k = 0; k < 120; k++) { g.fillStyle = 'rgba(20,18,14,.35)'; g.fillRect(i * w + rand(4, w - 4), j * w + rand(4, w - 4), 1.5, 1.5); }
+  }
+  g.strokeStyle = '#22211d'; g.lineWidth = 5;
+  for (let i = 0; i <= n; i++) { g.beginPath(); g.moveTo(i * w, 0); g.lineTo(i * w, s); g.moveTo(0, i * w); g.lineTo(s, i * w); g.stroke(); }
+  for (let i = 0; i < 6; i++) { const x = rand(0, s), y = rand(0, s), r = rand(20, 60); for (let k = 3; k > 0; k--) { g.strokeStyle = `rgba(70,48,18,${0.18 * k})`; g.lineWidth = 2; g.beginPath(); g.arc(x, y, r * k / 3, 0, Math.PI * 2); g.stroke(); } } // 물 얼룩
+  stains(g, s, 14, 'rgba(40,30,12,.5)', .3);
+}, null, (GW + 2) / 2);
+const ceilMat = new THREE.MeshStandardMaterial({ map: cT.map, bumpMap: cT.bump, bumpScale: 1.5, roughness: 1 });
 
 function textTex(text, color, w = 512, h = 256, font = 'bold 96px serif') {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
@@ -375,7 +450,7 @@ function initAudio() {
   for (let ch = 0; ch < 2; ch++) { const b = imp.getChannelData(ch); for (let i = 0; i < len; i++) b[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
   reverb.buffer = imp;
   const rg = ac.createGain(); rg.gain.value = 0.4; reverb.connect(rg); rg.connect(master);
-  startAmbient();
+  startAmbient(); initChaseMusic();
 }
 function out(node, wet = 0.3) {
   node.connect(master);
@@ -582,6 +657,41 @@ sfx.squelch = pos => {
   const n = noiseSrc(), lp = filt('lowpass', 500, 6), g = envGain(t, 0.03, 0.8, 0.4);
   lp.frequency.exponentialRampToValueAtTime(150, t + 0.4); n.connect(lp); lp.connect(g); g.connect(p); n.start(t); n.stop(t + 0.5);
 };
+// 쫓길 때 깔리는 음악: 불협화음 현악 + 북소리. 가까울수록 강해진다
+let chaseMus = null;
+function initChaseMusic() {
+  const g = ac.createGain(); g.gain.value = 0; out(g, 0.3);
+  const trem = ac.createGain(); trem.gain.value = 0.7; const lp = filt('lowpass', 700, 1.2);
+  lp.connect(trem); trem.connect(g);
+  const lfo = osc('sine', 6.5), lg = ac.createGain(); lg.gain.value = 0.3; lfo.connect(lg); lg.connect(trem.gain); lfo.start();
+  [55, 58.3, 82.4, 87.3, 116.5, 123.5].forEach((f, i) => {
+    const o = osc('sawtooth', f), og = ac.createGain(); og.gain.value = 0.045;
+    const v = osc('sine', 4 + i * 0.7), vg = ac.createGain(); vg.gain.value = f * 0.008; v.connect(vg); vg.connect(o.frequency);
+    o.connect(og); og.connect(lp); o.start(); v.start();
+  });
+  const hi = osc('sine', 1760), hg = ac.createGain(); hg.gain.value = 0.012; hi.connect(hg); hg.connect(g); hi.start(); // 귀를 찌르는 고음
+  chaseMus = { g, lp, hi, level: 0, beatT: 0, beat: 0 };
+}
+function updateMusic(dt, target) {
+  if (!chaseMus) return;
+  const M = chaseMus; M.level += (target - M.level) * Math.min(1, dt * (target > M.level ? 3 : 0.8));
+  const t = ac.currentTime;
+  M.g.gain.setTargetAtTime(M.level * 0.55, t, 0.1); M.lp.frequency.setTargetAtTime(400 + M.level * 2200, t, 0.2);
+  M.hi.frequency.setTargetAtTime(1600 + M.level * 500, t, 0.3);
+  if (M.level < 0.05) return;
+  M.beatT -= dt;
+  if (M.beatT <= 0) {
+    M.beat++; M.beatT = 0.62 - M.level * 0.26;
+    const o = osc('sine', 72), og = envGain(t, 0.004, 0.55 * M.level, 0.32); o.frequency.exponentialRampToValueAtTime(36, t + 0.3); o.connect(og); out(og, 0.2); o.start(t); o.stop(t + 0.4);
+    if (M.beat % 2 === 0) { const n = noiseSrc(), bp = filt('bandpass', rand(2500, 4200), 6), ng = envGain(t, 0.002, 0.18 * M.level, 0.25); n.connect(bp); bp.connect(ng); out(ng, 0.5); n.start(t); n.stop(t + 0.3); }
+  }
+}
+// 잡히는 순간의 묵직한 충격음
+sfx.impact = () => {
+  if (!ac) return; const t = ac.currentTime;
+  const o = osc('sine', 48), g = envGain(t, 0.005, 1.2, 1.4); o.frequency.exponentialRampToValueAtTime(22, t + 1.2); o.connect(g); out(g, 0.5); o.start(t); o.stop(t + 1.5);
+  const n = noiseSrc(), lp = filt('lowpass', 900), ng = envGain(t, 0.002, 0.9, 0.5); n.connect(lp); lp.connect(ng); out(ng, 0.6); n.start(t); n.stop(t + 0.6);
+};
 // 기워진 것: 늘어진 오르골 한 음
 sfx.musicNote = (pos, f) => {
   if (!ac) return; const t = ac.currentTime, p = panner(pos); p.refDistance = 3; p.rolloffFactor = 1.1; out(p, 0.8);
@@ -725,7 +835,19 @@ function hasLOS(a, b) {
 function makeMonster(o = {}) {
   // 기본: 창백하고 깡마른 형체, 얼굴을 덮은 긴 검은 머리카락, 텅 빈 눈
   const g = new THREE.Group();
-  const skin = new THREE.MeshStandardMaterial({ color: o.skin ?? 0xbdb5a8, roughness: o.rough ?? 0.7, metalness: o.metal ?? 0 });
+  const base = new THREE.Color(o.skin ?? 0xbdb5a8);
+  const skinTex = o.porcelain ? null : canvasTex(128, (c, s) => {      // 핏줄과 멍이 비치는 창백한 피부
+    c.fillStyle = '#' + base.getHexString(); c.fillRect(0, 0, s, s);
+    speckle(c, s, 0.1, 1500); stains(c, s, 6, 'rgba(80,60,90,.35)', .2); stains(c, s, 5, 'rgba(60,40,25,.45)', .25);
+    c.lineWidth = 1;
+    for (let i = 0; i < 9; i++) {
+      c.strokeStyle = `rgba(${rand(50, 80) | 0},${rand(40, 60) | 0},${rand(90, 120) | 0},.55)`;
+      let x = rand(0, s), y = rand(0, s); c.beginPath(); c.moveTo(x, y);
+      for (let k = 0; k < 8; k++) { x += rand(-12, 12); y += rand(4, 14); c.lineTo(x, y); } c.stroke();
+    }
+    stains(c, s, 2, 'rgba(90,10,10,.6)', .15);
+  });
+  const skin = new THREE.MeshStandardMaterial({ color: skinTex ? 0xffffff : base, map: skinTex, bumpMap: skinTex, bumpScale: 1.2, roughness: o.rough ?? 0.55, metalness: o.metal ?? 0 });
   const bruise = new THREE.MeshStandardMaterial({ color: o.joint ?? 0x6d6258, roughness: 0.8 });
   const gown = new THREE.MeshStandardMaterial({ color: 0x8a8476, roughness: 1, side: THREE.DoubleSide,
     map: canvasTex(64, (c, s) => { c.fillStyle = '#9a9384'; c.fillRect(0, 0, s, s); stains(c, s, 10, 'rgba(60,40,20,.6)', .4); stains(c, s, 4, 'rgba(90,5,5,.8)', .25); }) });
@@ -750,7 +872,11 @@ function makeMonster(o = {}) {
   add(new THREE.SphereGeometry(0.16, 12, 10), skin, 0, 0, 0, head).scale.set(0.82, o.headY ?? 1.22, 0.92);
   if (o.eyes !== false) for (const sx of [-1, 1]) {
     add(new THREE.SphereGeometry(0.045, 8, 8), voidMat, sx * 0.058, 0.03, 0.115, head).scale.set(1, 1.25, 0.6);
-    if (o.pupils !== false) add(new THREE.SphereGeometry(0.008, 6, 6), new THREE.MeshBasicMaterial({ color: 0xfff6e0, fog: false }), sx * 0.058, 0.025, 0.145, head);
+    if (o.pupils !== false) {
+      add(new THREE.SphereGeometry(0.008, 6, 6), new THREE.MeshBasicMaterial({ color: 0xfff6e0, fog: false }), sx * 0.058, 0.025, 0.145, head);
+      const tear = add(new THREE.BoxGeometry(0.009, rand(0.1, 0.16), 0.006), new THREE.MeshStandardMaterial({ color: 0x3a0303, roughness: 0.2 }), sx * 0.06, -0.06, 0.125, head); // 피눈물
+      tear.rotation.x = -0.35;
+    }
   }
   const mouthBase = o.mouth ?? [0.7, 1.5, 0.45];
   const mouth = add(new THREE.SphereGeometry(0.055, 10, 8), voidMat, 0, -0.1, 0.12, head); mouth.scale.set(...mouthBase);
@@ -776,14 +902,18 @@ function makeMonster(o = {}) {
     for (let f = 0; f < 5; f++) { const c = add(new THREE.CylinderGeometry(0.007, 0.003, 0.28, 4), skin, (f - 2) * 0.018, -armL - 0.12, 0.02, fore); c.rotation.set(0.25, 0, (f - 2) * 0.08); }
     sh.rotation.z = sx * 0.1; arms.push({ sh, fore });
   }
-  const legs = [];
+  const legs = [], knees = [];
   for (const sx of [-1, 1]) {
     const hip = new THREE.Group(); hip.position.set(sx * 0.1, 0.92, 0); body.add(hip);
-    add(new THREE.CylinderGeometry(0.045, 0.03, 0.94, 6), skin, 0, -0.46, 0, hip);
-    legs.push(hip);
+    add(new THREE.CylinderGeometry(0.05, 0.036, 0.47, 8), skin, 0, -0.235, 0, hip);
+    add(new THREE.SphereGeometry(0.04, 8, 6), bruise, 0, -0.47, 0, hip);                 // 툭 튀어나온 무릎뼈
+    const knee = new THREE.Group(); knee.position.y = -0.47; hip.add(knee);
+    add(new THREE.CylinderGeometry(0.034, 0.024, 0.46, 8), skin, 0, -0.23, 0, knee);
+    add(new THREE.BoxGeometry(0.06, 0.03, 0.16), skin, 0, -0.46, 0.04, knee);            // 맨발
+    legs.push(hip); knees.push(knee);
   }
   if (o.scale) g.scale.setScalar(o.scale);
-  g.userData = { body, head, hair, arms, legs, mouth, mouthBase, twitch: 0, faceY: 2.52 * (o.scale || 1) };
+  g.userData = { body, head, hair, arms, legs, knees, mouth, mouthBase, twitch: 0, faceY: 2.52 * (o.scale || 1) };
   return g;
 }
 
@@ -1062,7 +1192,7 @@ function makeBoss() {
 const MTYPES = {
   // 머리카락의 여자: 빛을 보고 발소리를 듣는다
   stalker: {
-    model: {}, see: true, hear: { run: 12, walk: 4.5, sneak: 1.4, still: 1.2 },
+    model: {}, see: true, hear: { run: 12, walk: 4.5, sneak: 1.4, still: 1.2 }, turn: 6, accel: 3.5,
     speed: { wander: 1.7, search: 2.5, chase: 3.7 }, lean: 0.32,
     voice: { f: 46, lp: 240, bp: 480, q: 2.2, growl: 0.3, vib: 6.5 }
   },
@@ -1075,12 +1205,12 @@ const MTYPES = {
   },
   // 하얀 인형: 보고 있는 동안엔 움직이지 않는다. 시선을 떼면 다가온다
   watcher: {
-    model: { skin: 0xe9e4da, rough: 0.25, metal: 0.05, joint: 0x9a948a, hair: false, gown: false, pupils: false, mouth: [0.0001, 0.0001, 0.0001], headY: 1.3 },
+    model: { skin: 0xe9e4da, rough: 0.25, metal: 0.05, porcelain: true, joint: 0x9a948a, hair: false, gown: false, pupils: false, mouth: [0.0001, 0.0001, 0.0001], headY: 1.3 },
     watcher: true, kind: 'watcher', speed: { wander: 1.5, hunt: 2.7 }
   },
   // 천장을 기는 것: 빛만 쫓는다. 손전등을 끄면 당신을 잃는다
   crawler: {
-    build: makeCrawler, kind: 'crawler', speed: { wander: 2.0, search: 2.6, chase: 4.6 },
+    build: makeCrawler, kind: 'crawler', turn: 10, accel: 6, speed: { wander: 2.0, search: 2.6, chase: 4.6 },
     voice: { f: 90, lp: 700, bp: 2600, q: 5, growl: 0.1, vib: 17 }
   },
   // 살덩어리: 아주 느리지만 언제나 당신이 어디 있는지 안다
@@ -1096,7 +1226,7 @@ const MTYPES = {
 };
 MTYPES.boss = {
   // 기워진 것: 손전등을 켜면 해골 얼굴로 빛을 '본다'. 끄면 머리가 돌아가 꿰맨 얼굴로 '듣고', 네 발로 더 빨리 긴다
-  build: makeBoss, kind: 'boss', noProxWake: true, killR: 0.95, grabR: 2.7,
+  build: makeBoss, kind: 'boss', noProxWake: true, turn: 4.5, accel: 3, killR: 0.95, grabR: 2.7,
   sun: { see: 24, hear: { run: 12, walk: 5, sneak: 1.5, still: 0 }, speed: { wander: 2.3, search: 2.9, chase: 3.5 } },
   moon: { see: 0, hear: { run: 22, walk: 9, sneak: 2.3, still: 0 }, speed: { wander: 2.6, search: 3.4, chase: 4.9 } },
   voice: { f: 36, lp: 220, bp: 520, q: 3, growl: 0.5, vib: 4 }
@@ -1120,25 +1250,180 @@ const ROSTER = [
   { type: 'stalker', wake: { t: 0, f: 4 }, delay: 14, msg: '또 하나가 깨어났다. 이번엔 더 가까이에서', scale: 1.12 },
   { type: 'boss', wake: { t: 0, f: 5 }, delay: 3.5, msg: '바닥 아래에서... 쇠가 긁히는 소리가 올라온다' }
 ];
+const shadowAll = o => o.traverse(c => { if (c.isMesh && !(c.material && c.material.transparent)) c.castShadow = true; });
 const monsterMeshes = ROSTER.map(r => {
   const T = MTYPES[r.type], m = T.build ? T.build() : makeMonster({ ...T.model, ...(r.scale ? { scale: r.scale } : {}) });
   scene.add(m); return m;
 });
 // 아이 귀신 (해치지 않는다. 막다른 곳에서 벽을 보고 울고 있다)
-const kidMeshes = [0, 1, 2].map(() => { const k = makeMonster({ scale: 0.5, mouth: [0.5, 0.9, 0.4] }); k.visible = false; scene.add(k); return k; });
+const kidMeshes = [0, 1, 2].map(() => { const k = makeMonster({ scale: 0.5, mouth: [0.5, 0.9, 0.4] }); k.visible = false; shadowAll(k); scene.add(k); return k; });
+monsterMeshes.forEach(shadowAll);
 const ghostMesh = makeMonster(); // 환영 (복도 끝, 등 뒤에 나타났다 사라짐)
-ghostMesh.visible = false; scene.add(ghostMesh);
+ghostMesh.visible = false; shadowAll(ghostMesh); scene.add(ghostMesh);
 const G = { active: null, t: 30, behindDone: false };
 
 /* =========================================================
    월드 구축
    ========================================================= */
+/* =========================================================
+   소품 (배관, 전선, 문, 잔해, 가구, 장난감)
+   ========================================================= */
+const P = {
+  pipe: new THREE.MeshStandardMaterial({ color: 0x3a3029, metalness: 0.7, roughness: 0.55,
+    map: canvasTex(128, (g, s) => { g.fillStyle = '#4a3f35'; g.fillRect(0, 0, s, s); stains(g, s, 14, 'rgba(110,55,20,.6)', .3); speckle(g, s, .2, 2000); }) }),
+  wire: new THREE.MeshStandardMaterial({ color: 0x0b0b0b, roughness: 0.6 }),
+  metal: new THREE.MeshStandardMaterial({ color: 0x6c6d68, metalness: 0.75, roughness: 0.45,
+    map: canvasTex(128, (g, s) => { g.fillStyle = '#7a7b75'; g.fillRect(0, 0, s, s); stains(g, s, 12, 'rgba(100,50,18,.65)', .25); speckle(g, s, .2, 2500); }) }),
+  door: new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.4, map: canvasTex(256, (g, s) => {
+    g.fillStyle = '#5d6458'; g.fillRect(0, 0, s, s); speckle(g, s, .15, 6000); stains(g, s, 14, 'rgba(90,45,15,.6)', .3);
+    g.fillStyle = '#121310'; g.fillRect(s * .3, s * .12, s * .4, s * .22);                       // 철망 창문
+    g.strokeStyle = 'rgba(120,120,110,.6)'; g.lineWidth = 1;
+    for (let i = 0; i < 12; i++) { g.beginPath(); g.moveTo(s * .3 + i * s * .035, s * .12); g.lineTo(s * .3, s * .12 + i * s * .02); g.stroke(); }
+    g.fillStyle = '#2a2a26'; g.fillRect(s * .78, s * .5, s * .1, s * .05);                         // 손잡이
+    drips(g, s, 10, '50,25,8', s * .35); g.strokeStyle = 'rgba(20,18,15,.8)'; g.lineWidth = 3; g.strokeRect(6, 6, s - 12, s - 12);
+  }) }),
+  frame: new THREE.MeshStandardMaterial({ color: 0x2c2d29, metalness: 0.5, roughness: 0.6 }),
+  paper: new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.9, map: canvasTex(64, (g, s) => {
+    g.fillStyle = '#b9b2a0'; g.fillRect(0, 0, s, s); g.fillStyle = 'rgba(40,40,40,.5)';
+    for (let i = 8; i < s - 6; i += 5) g.fillRect(6, i, rand(20, s - 12), 1.5); stains(g, s, 4, 'rgba(70,50,20,.5)', .4);
+  }) }),
+  rubble: new THREE.MeshStandardMaterial({ color: 0x5c5a52, roughness: 1 }),
+  blood: new THREE.MeshStandardMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, roughness: 0.25, map: canvasTex(256, (g, s) => {
+    g.clearRect(0, 0, s, s); g.strokeStyle = 'rgba(85,4,4,.85)'; g.lineCap = 'round';
+    for (let k = 0; k < 4; k++) { g.lineWidth = rand(8, 26); g.beginPath(); g.moveTo(s * .5 + rand(-20, 20), 0); g.bezierCurveTo(s * .5 + rand(-60, 60), s * .35, s * .5 + rand(-60, 60), s * .65, s * .5 + rand(-25, 25), s); g.stroke(); }
+    for (let i = 0; i < 18; i++) { g.fillStyle = 'rgba(80,3,3,.8)'; g.beginPath(); g.arc(s * .5 + rand(-70, 70), rand(0, s), rand(2, 9), 0, Math.PI * 2); g.fill(); }
+  }) }),
+  wood: new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.85 }),
+  fabric: new THREE.MeshStandardMaterial({ roughness: 1, map: canvasTex(128, (g, s) => { g.fillStyle = '#8c8574'; g.fillRect(0, 0, s, s); stains(g, s, 10, 'rgba(60,42,18,.6)', .35); stains(g, s, 3, 'rgba(95,6,6,.85)', .2); }) }),
+  bear: new THREE.MeshStandardMaterial({ color: 0x6e5236, roughness: 1 }),
+  stuffing: new THREE.MeshStandardMaterial({ color: 0xcfc8b8, roughness: 1 }),
+  black: new THREE.MeshBasicMaterial({ color: 0x000000 })
+};
+const blockMats = ['#7a2a22', '#2a4a6a', '#6a6a2a', '#2a5a3a'].map((c, i) => new THREE.MeshStandardMaterial({ roughness: 0.8, map: canvasTex(64, (g, s) => {
+  g.fillStyle = c; g.fillRect(0, 0, s, s); g.fillStyle = 'rgba(230,220,200,.75)'; g.font = 'bold 40px serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('ㄱㄴㄷㄹ'[i], s / 2, s / 2 + 2); speckle(g, s, .2, 400); stains(g, s, 3, 'rgba(20,10,5,.6)', .4);
+}) }));
+function mk(geo, mat, x, y, z, parent) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; parent.add(m); return m; }
+const propBuilders = {
+  bed(g) {   // 녹슨 병원 침대
+    for (const [x, z] of [[-0.42, -0.9], [0.42, -0.9], [-0.42, 0.9], [0.42, 0.9]]) mk(new THREE.CylinderGeometry(0.025, 0.025, 0.55, 6), P.metal, x, 0.27, z, g);
+    for (const x of [-0.42, 0.42]) mk(new THREE.BoxGeometry(0.04, 0.04, 1.85), P.metal, x, 0.48, 0, g);
+    mk(new THREE.BoxGeometry(0.9, 0.04, 0.04), P.metal, 0, 0.9, -0.9, g); mk(new THREE.BoxGeometry(0.9, 0.04, 0.04), P.metal, 0, 0.7, -0.9, g);
+    for (const x of [-0.42, 0.42]) mk(new THREE.CylinderGeometry(0.025, 0.025, 0.45, 6), P.metal, x, 0.72, -0.9, g);
+    const mt = mk(new THREE.BoxGeometry(0.82, 0.14, 1.75), P.fabric, 0, 0.56, 0.03, g); mt.rotation.z = rand(-0.05, 0.05);
+    for (let i = 0; i < 2; i++) mk(new THREE.BoxGeometry(0.03, 0.02, 0.4), P.wire, rand(-0.4, 0.4), 0.5, rand(-0.6, 0.6), g).rotation.y = rand(0, 3); // 끊어진 구속 끈
+  },
+  chair(g) { // 쓰러진 의자
+    const c = new THREE.Group(); g.add(c);
+    mk(new THREE.BoxGeometry(0.45, 0.04, 0.42), P.wood, 0, 0.45, 0, c);
+    for (const [x, z] of [[-0.2, -0.18], [0.2, -0.18], [-0.2, 0.18], [0.2, 0.18]]) mk(new THREE.CylinderGeometry(0.018, 0.018, 0.45, 6), P.metal, x, 0.22, z, c);
+    mk(new THREE.BoxGeometry(0.45, 0.4, 0.03), P.wood, 0, 0.7, -0.2, c);
+    if (Math.random() < 0.6) { c.rotation.x = -Math.PI / 2; c.position.y = 0.2; c.position.z = 0.1; }
+  },
+  cabinet(g) { // 문이 반쯤 열린 철제 캐비닛
+    mk(new THREE.BoxGeometry(0.6, 1.7, 0.42), P.metal, 0, 0.85, 0, g);
+    for (let i = 0; i < 3; i++) mk(new THREE.BoxGeometry(0.5, 0.02, 0.02), P.frame, 0, 0.35 + i * 0.5, 0.22, g);
+    const d = mk(new THREE.BoxGeometry(0.28, 0.6, 0.02), P.metal, 0.28, 1.35, 0.32, g); d.rotation.y = -0.9;
+    mk(new THREE.BoxGeometry(0.5, 0.5, 0.02), P.black, 0, 1.35, 0.212, g);
+  },
+  toys(g) {  // 흩어진 나무 블록과 배가 찢어진 곰인형
+    for (let i = 0; i < 6; i++) { const b = mk(new THREE.BoxGeometry(0.12, 0.12, 0.12), blockMats[i % 4], rand(-0.4, 0.4), 0.06, rand(-0.3, 0.3), g); b.rotation.set(rand(0, 0.3), rand(0, 3), 0); if (i > 3) b.position.y = 0.18; }
+    const bear = new THREE.Group(); bear.position.set(rand(-0.2, 0.2), 0, 0.1); bear.rotation.set(-0.3, rand(-1, 1), 0.4); g.add(bear);
+    mk(new THREE.SphereGeometry(0.13, 10, 8), P.bear, 0, 0.14, 0, bear).scale.set(1, 1.15, 0.85);
+    mk(new THREE.SphereGeometry(0.1, 10, 8), P.bear, 0, 0.36, 0, bear);
+    for (const sx of [-1, 1]) { mk(new THREE.SphereGeometry(0.04, 8, 6), P.bear, sx * 0.08, 0.45, 0, bear); mk(new THREE.SphereGeometry(0.05, 8, 6), P.bear, sx * 0.14, 0.06, 0.04, bear); mk(new THREE.SphereGeometry(0.045, 8, 6), P.bear, sx * 0.14, 0.2, 0.05, bear); }
+    mk(new THREE.SphereGeometry(0.014, 6, 4), P.black, -0.035, 0.38, 0.09, bear);                       // 한쪽 눈만 남았다
+    for (let i = 0; i < 6; i++) mk(new THREE.SphereGeometry(rand(0.02, 0.04), 6, 4), P.stuffing, rand(-0.06, 0.06), rand(0.08, 0.2), 0.1, bear); // 터진 솜
+  }
+};
+let props = [];   // 플레이어 충돌용 상자
+const propHit = (x, z, r) => props.some(b => x + r > b.min.x && x - r < b.max.x && z + r > b.min.z && z - r < b.max.z);
+
+function decorate(cells) {
+  const dummy = new THREE.Object3D(), open = [];
+  for (let z = 1; z < GH - 1; z++) for (let x = 1; x < GW - 1; x++) if (!isWallTile(x, z) && !(x <= 3 && z <= 3)) open.push({ x, z });
+  const shuffle = a => a.sort(() => Math.random() - .5);
+  // 천장 배관 (복도 방향을 따라 이어진다)
+  const pipes = [];
+  for (const t of open) {
+    const alongX = !isWallTile(t.x - 1, t.z) && !isWallTile(t.x + 1, t.z) && isWallTile(t.x, t.z - 1);
+    const alongZ = !isWallTile(t.x, t.z - 1) && !isWallTile(t.x, t.z + 1) && isWallTile(t.x - 1, t.z);
+    if (alongX || alongZ) pipes.push({ ...t, alongX });
+  }
+  for (const [r, yOff, side] of [[0.075, 0.22, 0.95], [0.035, 0.42, 0.78]]) {
+    const im = new THREE.InstancedMesh(new THREE.CylinderGeometry(r, r, TILE, 10), P.pipe, pipes.length);
+    pipes.forEach((t, i) => {
+      const c = tileCenter(t.x, t.z);
+      if (t.alongX) { dummy.position.set(c.x, WALL_H - yOff, c.z - side); dummy.rotation.set(0, 0, Math.PI / 2); }
+      else { dummy.position.set(c.x - side, WALL_H - yOff, c.z); dummy.rotation.set(Math.PI / 2, 0, 0); }
+      dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix);
+    });
+    im.castShadow = true; world.add(im);
+  }
+  // 천장에서 늘어진 전선
+  for (const t of shuffle(open.slice()).slice(0, 18)) {
+    const c = tileCenter(t.x, t.z), len = rand(0.5, 1.4), ox = rand(-0.8, 0.8), oz = rand(-0.8, 0.8);
+    const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(c.x + ox, WALL_H, c.z + oz), new THREE.Vector3(c.x + ox + rand(-0.2, 0.2), WALL_H - len * 0.6, c.z + oz + rand(-0.2, 0.2)), new THREE.Vector3(c.x + ox + rand(-0.3, 0.3), WALL_H - len, c.z + oz + rand(-0.3, 0.3))]);
+    const w = new THREE.Mesh(new THREE.TubeGeometry(curve, 10, 0.012, 5), P.wire); w.castShadow = true; world.add(w);
+  }
+  // 벽에 붙은 녹슨 철문
+  let doors = 0;
+  for (const t of shuffle(open.slice())) {
+    if (doors >= 12) break;
+    const dirs = DIRS.filter(([dx, dz]) => isWallTile(t.x + dx, t.z + dz) && !(t.x + dx === exitTile.x && t.z + dz === exitTile.z));
+    if (!dirs.length || Math.random() < 0.5) continue;
+    const [dx, dz] = dirs[0], c = tileCenter(t.x, t.z), g = new THREE.Group();
+    g.position.set(c.x + dx * (TILE / 2), 0, c.z + dz * (TILE / 2)); g.rotation.y = Math.atan2(-dx, -dz); world.add(g);
+    mk(new THREE.BoxGeometry(1.02, 2.12, 0.05), P.door, 0, 1.06, 0.03, g);
+    mk(new THREE.BoxGeometry(1.2, 0.09, 0.1), P.frame, 0, 2.17, 0.03, g);
+    for (const sx of [-1, 1]) mk(new THREE.BoxGeometry(0.09, 2.2, 0.1), P.frame, sx * 0.56, 1.1, 0.03, g);
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.12), new THREE.MeshStandardMaterial({ map: signTex(String(rand(100, 799) | 0), '#c8c2b0', '#2a2620') }));
+    plate.position.set(0, 2.38, 0.02); g.add(plate);
+    doors++;
+  }
+  // 바닥에 흩어진 서류와 잔해
+  const papers = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.21, 0.29), P.paper, 140);
+  const rubble = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), P.rubble, 260);
+  for (let i = 0; i < 140; i++) {
+    const t = open[(Math.random() * open.length) | 0], c = tileCenter(t.x, t.z);
+    dummy.position.set(c.x + rand(-1.1, 1.1), 0.004 + i * 0.00002, c.z + rand(-1.1, 1.1)); dummy.rotation.set(-Math.PI / 2, 0, rand(0, 6.3)); dummy.scale.setScalar(1);
+    dummy.updateMatrix(); papers.setMatrixAt(i, dummy.matrix);
+  }
+  for (let i = 0; i < 260; i++) {
+    const t = open[(Math.random() * open.length) | 0], c = tileCenter(t.x, t.z), wall = DIRS.find(([dx, dz]) => isWallTile(t.x + dx, t.z + dz));
+    const [dx, dz] = wall || [0, 0], k = rand(0.8, 1.2);
+    dummy.position.set(c.x + dx * k + rand(-0.4, 0.4) * (1 - Math.abs(dx)), 0.02, c.z + dz * k + rand(-0.4, 0.4) * (1 - Math.abs(dz)));
+    dummy.rotation.set(rand(0, 3), rand(0, 3), rand(0, 3)); dummy.scale.setScalar(rand(0.02, 0.08)); dummy.updateMatrix(); rubble.setMatrixAt(i, dummy.matrix);
+  }
+  papers.receiveShadow = rubble.receiveShadow = rubble.castShadow = true; world.add(papers, rubble);
+  // 바닥에 끌린 핏자국
+  for (const t of shuffle(open.slice()).slice(0, 9)) {
+    const c = tileCenter(t.x, t.z), along = !isWallTile(t.x - 1, t.z) && !isWallTile(t.x + 1, t.z);
+    const b = new THREE.Mesh(new THREE.PlaneGeometry(0.9, TILE * 1.1), P.blood);
+    b.rotation.set(-Math.PI / 2, 0, (along ? Math.PI / 2 : 0) + rand(-0.2, 0.2)); b.position.set(c.x + rand(-0.3, 0.3), 0.006, c.z + rand(-0.3, 0.3)); b.receiveShadow = true; world.add(b);
+  }
+  // 가구와 장난감: 벽에 붙여 놓는다 (복도 가운데는 비워 둔다)
+  props = [];
+  const kinds = ['bed', 'bed', 'chair', 'chair', 'cabinet', 'cabinet', 'toys', 'toys', 'toys', 'bed', 'chair', 'cabinet', 'toys', 'chair'];
+  let ki = 0;
+  for (const t of shuffle(open.slice())) {
+    if (ki >= kinds.length) break;
+    if (t.x >= exitTile.x - 2 && Math.abs(t.z - exitTile.z) < 2) continue;
+    const dirs = DIRS.filter(([dx, dz]) => isWallTile(t.x + dx, t.z + dz)); if (!dirs.length) continue;
+    const [dx, dz] = dirs[0], c = tileCenter(t.x, t.z), kind = kinds[ki++], g = new THREE.Group();
+    const off = kind === 'bed' ? 0.72 : 0.85;
+    g.position.set(c.x + dx * off, 0, c.z + dz * off); g.rotation.y = kind === 'bed' ? Math.atan2(-dz, dx) : Math.atan2(-dx, -dz);
+    propBuilders[kind](g); world.add(g);
+    if (kind !== 'toys') { g.updateMatrixWorld(true); props.push(new THREE.Box3().setFromObject(g)); }
+  }
+}
+
 let world = null, items = [], lamps = [], exitDoor = null, exitBlock = null, exitSignMat = null, exitLight = null;
 const S = { // 게임 상태
   state: 'menu', time: 0, fuses: 0, doorOpen: false, doorT: 0,
   player: { pos: new THREE.Vector3(), yaw: 0, pitch: 0, stamina: 100, exhausted: false, battery: 100, flash: true, bob: 0, moving: false, sprinting: false, sneaking: false, crouch: 0 },
   monsters: [], kids: [], killer: null, wakeT: 0, heartT: 0, breathT: 0, whisperT: 25, bangT: 14, deathT: 0, introShown: false,
-  fear: 0, glitch: 0, blackout: 0, followT: 40, followN: 0, followStepT: 0, followD: 5, bossDist: 99
+  fear: 0, glitch: 0, blackout: 0, followT: 40, followN: 0, followStepT: 0, followD: 5, bossDist: 99, shake: 0, musicTarget: 0
 };
 
 function disposeWorld() {
@@ -1155,9 +1440,9 @@ function buildWorld() {
   // 바닥/천장
   const size = (GW + 2) * TILE;
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), floorMat);
-  floor.rotation.x = -Math.PI / 2; floor.position.set(GW * TILE / 2, 0, GH * TILE / 2); world.add(floor);
+  floor.rotation.x = -Math.PI / 2; floor.position.set(GW * TILE / 2, 0, GH * TILE / 2); floor.receiveShadow = true; world.add(floor);
   const ceil = new THREE.Mesh(new THREE.PlaneGeometry(size, size), ceilMat);
-  ceil.rotation.x = Math.PI / 2; ceil.position.set(GW * TILE / 2, WALL_H, GH * TILE / 2); world.add(ceil);
+  ceil.rotation.x = Math.PI / 2; ceil.position.set(GW * TILE / 2, WALL_H, GH * TILE / 2); ceil.receiveShadow = true; world.add(ceil);
 
   // 벽 (인스턴싱)
   const normal = [], bloody = [];
@@ -1171,8 +1456,8 @@ function buildWorld() {
   const dummy = new THREE.Object3D();
   for (const [list, mat] of [[normal, wallMat], [bloody, bloodWallMat]]) {
     const im = new THREE.InstancedMesh(wallGeo, mat, list.length);
-    list.forEach(([x, z], i) => { dummy.position.set(x * TILE + TILE / 2, WALL_H / 2, z * TILE + TILE / 2); dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix); });
-    world.add(im);
+    list.forEach(([x, z], i) => { dummy.position.set(x * TILE + TILE / 2, WALL_H / 2, z * TILE + TILE / 2); dummy.rotation.y = ((x * 7 + z * 13) % 4) * Math.PI / 2; dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix); });
+    im.castShadow = im.receiveShadow = true; world.add(im);
   }
 
   // 출구
@@ -1220,6 +1505,8 @@ function buildWorld() {
     world.add(light, bulb); lamps.push({ light, bulbMat, base: 5, off: 0, t: rand(0, 3) });
   }
 
+  decorate(cells);
+
   // 피로 쓴 글씨
   const words = ['도망쳐', '불을 꺼', '뒤를 봐', '눈을 떼지 마', '숨 죽여', '여럿이야', '들린다'];
   const spots = cells.filter(c => c.d > 2).sort(() => Math.random() - .5);
@@ -1256,7 +1543,7 @@ function buildWorld() {
       ud.arms.forEach(a => { a.sh.rotation.x = 0; a.fore.rotation.x = 0; }); ud.legs.forEach(l => { l.rotation.x = 0; }); ud.head.rotation.set(0.6, 0, 0.3);
     }
     return { idx, cfg, kind: cfg.kind || 'hunter', type: r.type, wake: r.wake, msg: r.msg, mesh, pos: new THREE.Vector3(mp.x, 0, mp.z), path: [], state: 'dormant', dormant: idx === 0 ? 0 : (r.delay ?? 2.5),
-      chaseT: 0, repath: 0, stepT: 0, lastKnown: null, searchT: 0, dir: new THREE.Vector3(0, 0, 1), anim: 0, jerkT: 0, clickT: rand(1, 3), watched: false, poseT: 0, mode: 'sun', spinT: 0, riseT: 0, noteI: 0, noteT: 0, lineT: 8, breathT: 0, grabT: 0, grabCD: 0, stareT: 0, hitT: 0, goneT: 0, fade: 1, whisperT: rand(4, 8) };
+      chaseT: 0, repath: 0, stepT: 0, lastKnown: null, searchT: 0, dir: new THREE.Vector3(0, 0, 1), anim: 0, jerkT: 0, clickT: rand(1, 3), watched: false, poseT: 0, mode: 'sun', spinT: 0, riseT: 0, noteI: 0, noteT: 0, lineT: 8, breathT: 0, grabT: 0, grabCD: 0, stareT: 0, heading: rand(0, 6.28), curSpeed: 0, spd: 0, moveDist: 0, lookX: 0, lookY: 0, tw: new THREE.Vector3(), hitT: 0, goneT: 0, fade: 1, whisperT: rand(4, 8) };
   });
   S.killer = null;
 
@@ -1273,7 +1560,7 @@ function buildWorld() {
   });
 
   Object.assign(S, { time: 0, fuses: 0, doorOpen: false, doorT: 0, heartT: 0, breathT: 0, whisperT: rand(20, 35), bangT: 9.5, deathT: 0, introShown: false, wakeT: 0,
-    fear: 0, glitch: 0, blackout: 0, followT: rand(30, 45), followN: 0, followStepT: 0, followD: 5, bossDist: 99 });
+    fear: 0, glitch: 0, blackout: 0, followT: rand(30, 45), followN: 0, followStepT: 0, followD: 5, bossDist: 99, shake: 0, musicTarget: 0 });
   Object.assign(G, { active: null, t: rand(28, 40), behindDone: false }); ghostMesh.visible = false;
   scene.fog.density = FOG_DENSITY;
   updateHUD();
@@ -1487,8 +1774,8 @@ function updatePlayer(dt) {
   const speed = pl.sprinting ? 5.3 : pl.sneaking ? 1.45 : 2.9;
   _f.set(-Math.sin(pl.yaw), 0, -Math.cos(pl.yaw)); _r.set(Math.cos(pl.yaw), 0, -Math.sin(pl.yaw));
   const vx = (_f.x * mz + _r.x * mx) * speed * dt, vz = (_f.z * mz + _r.z * mx) * speed * dt;
-  if (!collides(pl.pos.x + vx, pl.pos.z, PR)) pl.pos.x += vx;
-  if (!collides(pl.pos.x, pl.pos.z + vz, PR)) pl.pos.z += vz;
+  if (!collides(pl.pos.x + vx, pl.pos.z, PR) && !propHit(pl.pos.x + vx, pl.pos.z, PR)) pl.pos.x += vx;
+  if (!collides(pl.pos.x, pl.pos.z + vz, PR) && !propHit(pl.pos.x, pl.pos.z + vz, PR)) pl.pos.z += vz;
 
   // 머리 흔들림 + 발소리
   if (pl.moving) {
@@ -1500,6 +1787,10 @@ function updatePlayer(dt) {
   const bobAmt = pl.sprinting ? 0.075 : 0.045;
   camera.position.set(pl.pos.x + Math.cos(pl.bob * 0.5) * bobAmt * 0.4, EYE - pl.crouch * 0.6 + Math.abs(Math.sin(pl.bob)) * bobAmt - bobAmt / 2, pl.pos.z);
   camera.rotation.set(pl.pitch, pl.yaw, Math.sin(pl.bob * 0.5) * (pl.sprinting ? 0.012 : 0.006));
+  if (S.shake > 0) {                                                          // 가까이서 쫓기거나 거인이 발을 구르면 화면이 흔들린다
+    camera.position.x += rand(-1, 1) * S.shake; camera.position.y += rand(-1, 1) * S.shake; camera.rotation.z += rand(-1, 1) * S.shake * 0.6;
+    S.shake = Math.max(0, S.shake - dt * 0.08);
+  }
 
   // 숨소리
   if (pl.stamina < 35) { S.breathT -= dt; if (S.breathT <= 0) { sfx.breath(); S.breathT = pl.exhausted ? 0.75 : 1.2; } }
@@ -1575,14 +1866,73 @@ function pickWanderTarget() {
   return pt;
 }
 const _tmp = new THREE.Vector3(), _ndc = new THREE.Vector3();
-// 경로를 따라 이동. 실제로 움직였으면 true
-function followPath(m, step, dt) {
-  if (!m.path.length) return false;
-  const tc = tileCenter(m.path[0].x, m.path[0].z), d = tc.sub(m.pos).setY(0), l = d.length();
-  if (l < 0.08) { m.path.shift(); return false; }
-  d.divideScalar(l); m.pos.addScaledVector(d, Math.min(step, l)); m.dir.lerp(d, Math.min(1, dt * 8));
-  return true;
+const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
+function dampAngle(obj, key, target, k) { obj[key] += wrapA(target - obj[key]) * Math.min(1, k); }
+// 몸통 폭만큼 여유를 두고 벽에 걸리지 않는 직선인지
+function clearLine(a, b) {
+  if (!hasLOS(a, b)) return false;
+  const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1, ox = -dz / l * 0.32, oz = dx / l * 0.32;
+  return hasLOS({ x: a.x + ox, z: a.z + oz }, { x: b.x + ox, z: b.z + oz }) && hasLOS({ x: a.x - ox, z: a.z - oz }, { x: b.x - ox, z: b.z - oz });
 }
+// 목표 지점으로: 서서히 가속하고, 정해진 속도로만 방향을 튼다 (급하게 꺾을 땐 느려진다). 움직인 거리를 돌려준다
+function moveToward(m, tx, tz, speed, dt) {
+  const dx = tx - m.pos.x, dz = tz - m.pos.z, l = Math.hypot(dx, dz);
+  if (l < 1e-3) return 0;
+  const want = Math.atan2(dx, dz);
+  m.heading = wrapA(m.heading + clamp(wrapA(want - m.heading), -1, 1) * Math.min(1, (m.cfg.turn || 7) * dt));
+  const align = Math.cos(wrapA(want - m.heading));
+  m.curSpeed += (speed * Math.max(0.3, align) - m.curSpeed) * Math.min(1, dt * (m.cfg.accel || 4));
+  const step = Math.min(Math.max(0, m.curSpeed) * dt, l), hx = Math.sin(m.heading), hz = Math.cos(m.heading);
+  let nx = m.pos.x + hx * step, nz = m.pos.z + hz * step;
+  if (collides(nx, nz, 0.22)) { nx = m.pos.x + dx / l * step; nz = m.pos.z + dz / l * step; }   // 벽에 닿으면 곧장 목표 쪽으로
+  m.pos.x = nx; m.pos.z = nz; m.dir.set(hx, 0, hz);
+  return step;
+}
+// 경로를 따라 이동: 보이는 데까지 곧장 가로질러(경로 펴기) 모퉁이를 부드럽게 돈다
+function followPath(m, step, dt) {
+  if (!m.path.length) { m.curSpeed *= 0.85; return 0; }
+  for (let k = 0; k < 3 && m.path.length > 1; k++) { const n = tileCenter(m.path[1].x, m.path[1].z); if (clearLine(m.pos, n)) m.path.shift(); else break; }
+  const tc = tileCenter(m.path[0].x, m.path[0].z), l = Math.hypot(tc.x - m.pos.x, tc.z - m.pos.z);
+  if (l < (m.path.length > 1 ? 0.5 : 0.1)) { m.path.shift(); return m.path.length ? followPath(m, step, dt) : 0; }
+  return moveToward(m, tc.x, tc.z, step / dt, dt);
+}
+// 사람 형태의 걸음: 무릎이 굽고, 엉덩이가 흔들리고, 팔이 반대로 흔들린다. 발이 땅에 닿으면 true
+function gait(m, ud, dt, o) {
+  const amp = clamp(m.spd / 3, 0, 1), prev = Math.sin(m.anim);
+  m.anim += (m.moveDist || 0) / (o.stride || 0.85) * Math.PI;
+  const ph = m.anim, A = 0.15 + 0.4 * amp, t = S.time + m.idx * 1.7;
+  for (let i = 0; i < 2; i++) {
+    const p2 = ph + i * Math.PI;
+    ud.legs[i].rotation.x = -Math.sin(p2) * A;
+    if (ud.knees) ud.knees[i].rotation.x = 0.06 + Math.max(0, Math.cos(p2)) * (0.3 + 0.8 * amp);
+  }
+  ud.body.position.y = (Math.abs(Math.cos(ph)) - 0.6) * 0.06 * amp + Math.sin(t * 1.5) * 0.008 * (1 - amp);   // 걸을 땐 오르내리고, 서 있을 땐 숨을 쉰다
+  ud.body.rotation.z = Math.sin(ph) * 0.05 * amp + Math.sin(t * 0.7) * 0.02;
+  ud.body.rotation.y = Math.sin(ph) * 0.1 * amp;
+  ud.body.rotation.x += ((o.lean || 0) + Math.sin(t * 1.5) * 0.015 - ud.body.rotation.x) * Math.min(1, dt * 4);
+  if (ud.arms) for (let i = 0; i < 2; i++) {
+    const p2 = ph + i * Math.PI, a = ud.arms[i];
+    const target = -(o.reach || 0) + Math.sin(p2) * (0.15 + 0.4 * amp) + Math.sin(t * 1.1 + i) * 0.04;
+    a.sh.rotation.x += (target - a.sh.rotation.x) * Math.min(1, dt * 10);
+    a.fore.rotation.x += (-0.15 - (o.reach ? 0.45 : 0) - Math.max(0, Math.sin(p2)) * 0.35 * amp - a.fore.rotation.x) * Math.min(1, dt * 10);
+  }
+  return amp > 0.15 && Math.sign(Math.sin(m.anim)) !== Math.sign(prev);
+}
+// 고개를 돌려 플레이어를 쳐다본다 (+ 가끔씩 비정상적으로 꺾이는 경련)
+function headTrack(m, ud, pp, dt, on, headY, twitchAmt = 1) {
+  let ty = 0, tx = 0;
+  if (on) {
+    const d = Math.hypot(pp.x - m.pos.x, pp.z - m.pos.z);
+    ty = clamp(wrapA(Math.atan2(pp.x - m.pos.x, pp.z - m.pos.z) - m.mesh.rotation.y), -1.3, 1.3);
+    tx = clamp(Math.atan2(headY - camera.position.y, d), -0.5, 0.7) - ud.body.rotation.x * 0.8;
+  }
+  m.lookY += (ty - m.lookY) * Math.min(1, dt * (on ? 4 : 2)); m.lookX += (tx - m.lookX) * Math.min(1, dt * 4);
+  ud.twitch -= dt;
+  if (ud.twitch <= 0) { m.tw.set(rand(-0.3, 0.35), rand(-0.35, 0.35), rand(-0.9, 0.9)).multiplyScalar(twitchAmt); ud.twitch = rand(0.08, m.state === 'chase' ? 0.6 : 2.2); }
+  m.tw.multiplyScalar(1 - Math.min(1, dt * 1.5));
+  ud.head.rotation.set(m.lookX + m.tw.x, m.lookY + m.tw.y, m.tw.z);
+}
+
 // 플레이어 눈에 '보이는지': 화면 안에 있고, 벽에 가리지 않고, 빛이 닿거나 아주 가까울 때
 function isSeenByPlayer(m, dist) {
   if (S.blackout > 0) return false;
@@ -1635,6 +1985,9 @@ function updateMonsters(dt) {
     if (m.state === 'chase') chased = true;
   }
   $('danger').style.opacity = (fear * 0.7).toFixed(3);
+  const closeN = clamp(1 - (nearest - 2) / 14, 0, 1);
+  S.musicTarget = chased ? 0.35 + 0.65 * closeN : 0;
+  if (chased && nearest < 6) S.shake = Math.max(S.shake, (1 - nearest / 6) * 0.025);
   S.fear = fear;
   if (nearest < 16) {
     const close = clamp(1 - (nearest - 2) / 14, 0, 1);
@@ -1666,14 +2019,11 @@ function navigate(m, dt, sensed, chaseTime, pp, pt, dist, los) {
     if (!isWallTile(tgt.x, tgt.z)) m.path = findPath(mt.x, mt.z, tgt.x, tgt.z);
   }
   const speed = (m.speeds || m.cfg.speed)[m.state] + (m.kind === 'boss' ? 0 : S.fuses * 0.13), step = speed * dt;
-  let moved = false;
-  if (m.state === 'chase' && los && dist < TILE * 1.6) {
-    const d = pp.clone().sub(m.pos).setY(0).normalize();
-    const nx = m.pos.x + d.x * step, nz = m.pos.z + d.z * step;
-    if (!collides(nx, nz, 0.25)) { m.pos.x = nx; m.pos.z = nz; m.dir.lerp(d, 0.3); moved = true; }
-  }
-  if (!moved) moved = followPath(m, step, dt);
-  return { moved, speed };
+  let d = 0;
+  if (m.state === 'chase' && los && dist < TILE * 1.8 && clearLine(m.pos, pp)) d = moveToward(m, pp.x, pp.z, speed, dt);
+  if (!d) d = followPath(m, step, dt);
+  m.moveDist = d; m.spd += (d / dt - m.spd) * Math.min(1, dt * 6);
+  return { moved: d > 0.0005, speed, d };
 }
 
 // 천장을 기는 것: 손전등 빛만 쫓는다. 머리 위에서 떨어져 덮친다
@@ -1681,19 +2031,20 @@ function updateCrawler(m, dt, dist, pp, pt) {
   const pl = S.player, ud = m.mesh.userData, los = hasLOS(m.pos, pp);
   const lit = pl.flash && flashlight.intensity > 4;
   const sensed = lit && ((los && dist < 16) || dist < 4.5);
-  const { moved, speed } = navigate(m, dt, sensed, 2.5, pp, pt, dist, los);
+  const { moved, speed, d: md } = navigate(m, dt, sensed, 2.5, pp, pt, dist, los);
+  m.anim += md / 0.35 * Math.PI;
   if (moved) {
-    m.anim += dt * speed * 4;
     m.stepT -= dt;
     if (m.stepT <= 0 && dist < 18) { sfx.skitter(m.pos.clone().setY(WALL_H - 0.2)); m.stepT = m.state === 'chase' ? 0.13 : 0.32; }
   }
   if (dist < 1.0) { triggerDeath(m); return; }
-  m.jerkT -= dt;
-  if (m.state !== 'chase' || m.jerkT <= 0) { m.mesh.position.copy(m.pos); m.jerkT = rand(0.03, 0.1); }
-  const faceDir = (m.state === 'chase' && dist < 8) ? pp.clone().sub(m.pos).setY(0).normalize() : m.dir;
-  m.mesh.rotation.y = Math.atan2(faceDir.x, faceDir.z);
-  ud.legs.forEach(l => { const s2 = Math.sin(m.anim + l.phase); l.hip.rotation.y = s2 * 0.35; l.hip.rotation.x = Math.max(0, Math.cos(m.anim + l.phase)) * 0.25; });
-  ud.body.position.y = Math.sin(m.anim * 2) * 0.02;
+  m.mesh.position.copy(m.pos);
+  dampAngle(m.mesh.rotation, 'y', m.state === 'chase' && dist < 6 ? Math.atan2(pp.x - m.pos.x, pp.z - m.pos.z) : m.heading, dt * 9);
+  // 다리 여덟 개가 두 무리씩 번갈아 짚는다 (들어 올리는 동안만 앞으로 휘젓는다)
+  const amp = clamp(m.spd / 3, 0, 1);
+  ud.legs.forEach((l, i) => { const p2 = m.anim + ((i + (i >> 1)) % 2) * Math.PI; l.hip.rotation.y = Math.sin(p2) * 0.4 * amp; l.hip.rotation.x = Math.max(0, Math.cos(p2)) * 0.35 * amp + Math.sin(S.time * 3 + i) * 0.03; });
+  ud.body.position.y = Math.abs(Math.sin(m.anim)) * 0.03 * amp + Math.sin(S.time * 2) * 0.01;
+  ud.body.rotation.z = Math.sin(m.anim) * 0.06 * amp;
   ud.twitch -= dt;
   if (ud.twitch <= 0) { ud.head.rotation.set(rand(-0.3, 0.3), rand(-0.4, 0.4), rand(-1.6, 1.6)); ud.twitch = rand(0.05, m.state === 'chase' ? 0.2 : 0.9); }
   ud.mouth.scale.y = ud.mouthBase[1] * (m.state === 'chase' ? 2.2 : 1);
@@ -1882,38 +2233,35 @@ function updateBoss(m, dt, dist, pp, pt) {
   if (sees && m.state !== 'chase' && dist > 6) {
     m.state = 'stare'; m.stareT = 1.5; m.path = []; sfx.hit(); S.glitch = 0.8; bossSay(m, BOSS_LINES.sun[0], 2.4); return;
   }
-  const { moved, speed } = navigate(m, dt, sees || dist < hearR, sees ? 6 : 3.5, pp, pt, dist, los);
+  navigate(m, dt, sees || dist < hearR, sees ? 6 : 3.5, pp, pt, dist, los);
   if (m.state === 'chase' && dist < cfg.grabR && m.grabCD <= 0 && los) { m.state = 'grab'; m.grabT = 0.5; sfx.screech(head); return; }
-  if (moved) {
-    m.anim += dt * speed * (moon ? 3.2 : 2.0);
-    m.stepT -= dt;
-    if (m.stepT <= 0) {
-      sfx.clank(m.pos.clone().setY(0.2), m.state === 'chase' ? 1 : 0.6);
-      if (Math.random() < 0.6) sfx.scrape(m.pos.clone().setY(0.05));     // 집게손이 바닥을 긁는다
-      m.stepT = moon ? 0.2 : 0.5;
-    }
-  }
   if (dist < cfg.killR) { triggerDeath(m); return; }
   m.lineT -= dt;
   if (m.lineT <= 0 && dist < 20) { bossSay(m, BOSS_LINES[m.mode][(Math.random() * BOSS_LINES[m.mode].length) | 0]); m.lineT = rand(16, 24); }
 
-  // 모양: 낮게 웅크린 채 성큼성큼 / 어둠 속에선 네 발로 기어 온다. 가까울수록 뚝뚝 끊겨 움직인다
-  m.jerkT -= dt;
-  if (m.state !== 'chase' || dist > 10 || m.jerkT <= 0) { m.mesh.position.copy(m.pos); m.jerkT = rand(0.04, 0.14); }
-  const faceDir = (m.state === 'chase' && dist < 9) ? pp.clone().sub(m.pos).setY(0).normalize() : m.dir;
-  m.mesh.rotation.y = Math.atan2(faceDir.x, faceDir.z);
-  const sw = Math.sin(m.anim);
-  ud.legs[0].rotation.x = sw * 0.6; ud.legs[1].rotation.x = -sw * 0.6;
-  ud.body.rotation.x += ((moon ? 1.0 : 0.35) - ud.body.rotation.x) * Math.min(1, dt * 5);
-  ud.body.position.y = moon ? -0.4 : Math.abs(Math.cos(m.anim)) * 0.05;
-  ud.arms[0].sh.rotation.x = (moon ? -1.2 : -0.2) - sw * (moon ? 0.7 : 0.3);
-  ud.arms[1].sh.rotation.x = (moon ? -1.1 : 0.15) + sw * (moon ? 0.7 : 0.12);      // 집게팔은 질질 끌린다
-  ud.arms[0].fore.rotation.x = moon ? -0.3 : -0.5; ud.arms[1].fore.rotation.x = moon ? -0.2 : 0.1;
-  ud.twitch -= dt;
-  if (ud.twitch <= 0) {
-    ud.head.rotation.set(moon ? -0.9 : rand(-0.3, 0.2), rand(-0.4, 0.4), rand(-1.4, 1.4)); // 목이 비정상적으로 꺾인다
-    ud.twitch = rand(0.05, m.state === 'chase' ? 0.22 : 0.9);
+  // 모양: 낮게 웅크린 채 성큼성큼 / 어둠 속에선 네 발로 기어 온다
+  const ch = m.state === 'chase';
+  m.mesh.position.copy(m.pos);
+  dampAngle(m.mesh.rotation, 'y', ch && dist < 8 && los ? Math.atan2(pp.x - m.pos.x, pp.z - m.pos.z) : m.heading, dt * 4.5);
+  const prevS = Math.sin(m.anim);
+  m.anim += (m.moveDist || 0) / (moon ? 0.7 : 1.15) * Math.PI;
+  const sw = Math.sin(m.anim), amp = clamp(m.spd / 3, 0, 1), t = S.time;
+  if (amp > 0.15 && Math.sign(sw) !== Math.sign(prevS)) {
+    sfx.clank(m.pos.clone().setY(0.2), ch ? 1 : 0.6); S.shake = Math.max(S.shake, clamp(1 - dist / 12, 0, 1) * 0.035);
+    if (Math.random() < 0.5) sfx.scrape(m.pos.clone().setY(0.05));         // 집게손이 바닥을 긁는다
   }
+  ud.legs[0].rotation.x = -sw * (0.2 + 0.5 * amp); ud.legs[1].rotation.x = sw * (0.2 + 0.5 * amp);
+  ud.body.rotation.x += ((moon ? 1.0 : 0.35) + Math.sin(t * 1.2) * 0.02 - ud.body.rotation.x) * Math.min(1, dt * 3);
+  ud.body.rotation.z = sw * 0.06 * amp; ud.body.rotation.y = sw * 0.12 * amp;
+  ud.body.position.y += ((moon ? -0.4 : (Math.abs(Math.cos(m.anim)) - 0.6) * 0.08 * amp + Math.sin(t * 1.2) * 0.012) - ud.body.position.y) * Math.min(1, dt * 8);
+  const aL = (moon ? -1.2 : -0.25) + sw * (moon ? 0.7 : 0.35) * amp + Math.sin(t * 0.9) * 0.05;
+  const aR = (moon ? -1.1 : 0.15) - sw * (moon ? 0.7 : 0.12) * amp + Math.sin(t * 0.7 + 1) * 0.03; // 집게팔은 질질 끌린다
+  ud.arms[0].sh.rotation.x += (aL - ud.arms[0].sh.rotation.x) * Math.min(1, dt * 8);
+  ud.arms[1].sh.rotation.x += (aR - ud.arms[1].sh.rotation.x) * Math.min(1, dt * 6);
+  ud.arms[0].fore.rotation.x += ((moon ? -0.3 : -0.5 - Math.max(0, sw) * 0.3 * amp) - ud.arms[0].fore.rotation.x) * Math.min(1, dt * 8);
+  ud.arms[1].fore.rotation.x += ((moon ? -0.2 : 0.1) - ud.arms[1].fore.rotation.x) * Math.min(1, dt * 6);
+  if (moon) { m.lookX = -0.9; ud.twitch -= dt; if (ud.twitch <= 0) { ud.head.rotation.set(-0.9, rand(-0.4, 0.4), rand(-1.4, 1.4)); ud.twitch = rand(0.1, 0.6); } }
+  else headTrack(m, ud, pp, dt, los && dist < 16, 2.3, 1.3);                  // 해골 얼굴이 언제나 이쪽을 따라온다
 }
 
 // 머리카락의 여자 / 눈 없는 것: 감각으로 찾고, 쫓고, 놓치면 수색한다
@@ -1935,33 +2283,19 @@ function updateHunter(m, dt, dist, pp, pt) {
   if ((sees || hears) && m.state !== 'chase' && m.type === 'listener') sfx.clicks(m.pos.clone().setY(2), 4);
   const { moved, speed } = navigate(m, dt, sees || hears, sees ? 7 : cfg.see ? 4 : 2.5, pp, pt, dist, los);
 
-  if (moved) {
-    m.stepT -= dt;
-    if (m.stepT <= 0) { sfx.thud(m.pos.clone().setY(0.3), m.state === 'chase' ? 1 : 0.7); m.stepT = m.state === 'chase' ? 0.3 : 0.62; }
-    m.anim += dt * speed * 2.6;
-  }
   // 눈 없는 것은 주기적으로 혀를 차며 주변을 더듬는다 (어디 있는지 알려주는 신호)
   if (m.type === 'listener') { m.clickT -= dt; if (m.clickT <= 0) { sfx.clicks(m.pos.clone().setY(2.1), m.state === 'chase' ? 2 : 3); m.clickT = m.state === 'chase' ? rand(0.5, 0.9) : rand(1.6, 3.2); } }
 
   if (dist < 0.95) { triggerDeath(m); return; }
 
-  // 모델 연출: 가까이서 추격할 땐 뚝뚝 끊기듯 움직인다
-  m.jerkT -= dt;
-  if (m.state !== 'chase' || dist > 12 || m.jerkT <= 0) { m.mesh.position.copy(m.pos); m.jerkT = rand(0.05, 0.16); }
-  const faceDir = (m.state === 'chase' && dist < 8) ? pp.clone().sub(m.pos).setY(0).normalize() : m.dir;
-  m.mesh.rotation.y = Math.atan2(faceDir.x, faceDir.z);
-  const sw = Math.sin(m.anim), ch = m.state === 'chase';
-  ud.legs[0].rotation.x = sw * 0.55; ud.legs[1].rotation.x = -sw * 0.55;
-  ud.arms[0].sh.rotation.x = -sw * 0.5 - (ch ? 0.9 : 0.1); ud.arms[1].sh.rotation.x = sw * 0.5 - (ch ? 0.9 : 0.1);
-  ud.arms[0].fore.rotation.x = ud.arms[1].fore.rotation.x = ch ? -0.6 : -0.15;
-  ud.body.rotation.x = ch ? cfg.lean : cfg.lean * 0.4;
-  ud.body.position.y = Math.abs(Math.cos(m.anim)) * 0.05;
-  ud.twitch -= dt;
-  if (ud.twitch <= 0) {
-    if (m.type === 'listener') ud.head.rotation.set(rand(-0.6, 0.2), rand(-0.9, 0.9), rand(-1.2, 1.2)); // 소리 나는 쪽으로 고개를 꺾는다
-    else ud.head.rotation.set(rand(-0.35, 0.45), rand(-0.5, 0.5), rand(-0.9, 0.9));
-    ud.twitch = rand(0.05, ch ? 0.25 : m.type === 'listener' ? 0.5 : 1.4);
-  }
+  // 모델 연출: 자연스러운 걸음, 몸 방향은 천천히 틀고, 고개는 이쪽을 쫓는다
+  const ch = m.state === 'chase';
+  m.mesh.position.copy(m.pos);
+  dampAngle(m.mesh.rotation, 'y', ch && dist < 7 && los ? Math.atan2(pp.x - m.pos.x, pp.z - m.pos.z) : m.heading, dt * 6);
+  if (gait(m, ud, dt, { lean: ch ? cfg.lean : cfg.lean * 0.4, reach: ch ? 0.85 : 0, stride: ch ? 1.05 : 0.8 }))
+    sfx.thud(m.pos.clone().setY(0.3), ch ? 1 : 0.6);
+  headTrack(m, ud, pp, dt, (los && dist < 14) || m.type === 'listener', 2.5 * (m.mesh.scale.x || 1), m.type === 'listener' ? 1.6 : 1);
+  if (m.type === 'listener' && !(los && dist < 14)) m.lookY = Math.sin(S.time * 0.9 + m.idx) * 0.9;   // 소리를 찾아 고개를 이리저리 돌린다
   ud.hair.rotation.x = Math.sin(S.time * 1.3) * 0.04 + (ch ? -0.15 : 0);
   setVoice(m, new THREE.Vector3(m.pos.x, 2.4, m.pos.z), ch ? 0.7 : 0.35, ch ? 1.6 : 0.45);
 }
@@ -2001,7 +2335,7 @@ function updateWatcher(m, dt, dist, pp, pt) {
    ========================================================= */
 function triggerDeath(m) {
   S.state = 'dying'; S.deathT = 0; S.killer = m;
-  sfx.scream();
+  sfx.scream(); sfx.impact(); S.musicTarget = 0;
   const pl = S.player, monsterMesh = m.mesh;
   const d = m.pos.clone().sub(new THREE.Vector3(pl.pos.x, 0, pl.pos.z)).setY(0).normalize();
   pl.yaw = Math.atan2(-d.x, -d.z); pl.pitch = 0.05;
@@ -2178,8 +2512,11 @@ function loop() {
     updateEnvironment(dt);
   }
   updateListener();
+  updateMusic(dt, S.state === 'playing' ? (S.musicTarget || 0) : 0);
   S.glitch = Math.max(0, S.glitch - dt * 1.6);
   postMat.uniforms.uTime.value += dt;
+  dustMat.uniforms.uTime.value += dt; dustMat.uniforms.uCam.value.copy(camera.position);
+  dustMat.uniforms.uFlash.value = clamp(flashlight.intensity / 24, 0, 1); dustMat.uniforms.uScale.value = renderer.getPixelRatio();
   postMat.uniforms.uFear.value += ((S.state === 'playing' || S.state === 'dying' || S.state === 'waking' ? S.fear : 0) - postMat.uniforms.uFear.value) * Math.min(1, dt * 3);
   postMat.uniforms.uGlitch.value = S.glitch;
   renderer.setRenderTarget(rt); renderer.render(scene, camera);
