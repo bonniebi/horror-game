@@ -20,6 +20,10 @@
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
   #flash { position: fixed; inset: 0; pointer-events: none; background: #fff; opacity: 0; }
   #eyelid { position: fixed; inset: 0; pointer-events: none; background: #000; opacity: 0; z-index: 4; }
+  #stageCard { position: fixed; inset: 0; z-index: 7; pointer-events: none; opacity: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 16px; }
+  #stageCard .num { color: #8a8378; font-size: 13px; letter-spacing: .5em; margin-bottom: 10px; }
+  #stageCard .name { font-family: "Nanum Myeongjo", "Batang", serif; font-size: clamp(38px, 9vw, 68px); font-weight: 900; letter-spacing: .25em; color: #b31212; text-shadow: 0 0 24px rgba(200,0,0,.45); }
+  #stageCard .line { margin-top: 18px; color: #cfc6b6; font-size: 15px; letter-spacing: .08em; max-width: 520px; line-height: 1.8; }
 
   /* ---------- HUD ---------- */
   #hud { position: fixed; left: 20px; bottom: 20px; display: none; flex-direction: column; gap: 8px;
@@ -82,6 +86,7 @@
 <div id="danger"></div>
 <div id="flash"></div>
 <div id="eyelid"></div>
+<div id="stageCard"><div class="num"></div><div class="name"></div><div class="line"></div></div>
 <div id="crosshair"></div>
 
 <div id="hud">
@@ -106,7 +111,8 @@
     <p class="story">
       차가운 바닥 위에서 눈을 떴다. 처음 보는 방이다.<br>
       문 밖으로는 끝없이 갈라지는 복도가 미로처럼 이어진다.<br>
-      흩어진 <b>퓨즈 5개</b>를 찾아 출구의 전원을 살려야 한다.<br>
+      방마다 흩어진 <b>퓨즈</b>를 모아 다음 문을 열고,<br>
+      <b>네 개의 방</b> — 병동, 놀이방, 기계실, 무너진 곳 — 을 지나 탈출해야 한다.<br>
       그리고 이곳에는 <em>그것들</em>이 있다. 하나가 아니다.
       <span class="hint">
         — 머리카락의 여자는 빛을 보고, 발소리를 듣는다<br>
@@ -149,7 +155,8 @@
   <div class="panel">
     <h2 id="endTitle"></h2>
     <p class="stats" id="endStats"></p>
-    <button class="btn" id="restartBtn">다시 하기</button>
+    <button class="btn" id="restartBtn">이 방부터 다시</button>
+    <div style="margin-top:14px"><button class="btn" id="fromStartBtn" style="font-size:13px;padding:9px 26px;border-color:#4a3a3a">처음부터</button></div>
   </div>
 </div>
 
@@ -163,8 +170,8 @@ import * as THREE from 'three';
    설정
    ========================================================= */
 const TILE = 2.5, WALL_H = 3.0, EYE = 1.6, PR = 0.3;   // 타일 크기, 벽 높이, 눈높이, 플레이어 반경
-const MW = 11, MH = 11, GW = MW * 2 + 1, GH = MH * 2 + 1; // 미로 셀 수 → 타일 그리드
-const FUSE_COUNT = 5, BATT_COUNT = 7;
+let MW = 11, MH = 11, GW = MW * 2 + 1, GH = MH * 2 + 1; // 미로 셀 수 → 타일 그리드 (방마다 바뀐다)
+let FUSE_COUNT = 5; const BATT_COUNT = 5;
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const isTouch = matchMedia('(pointer: coarse)').matches;
 const $ = id => document.getElementById(id);
@@ -569,7 +576,8 @@ const zoneFloorMats = [0, 1, 2, 3].map(z => [0, 1].map(() => {
 }));
 let zoneMap = null;
 const zoneAt = (x, z) => zoneMap[clamp(z, 0, GH - 1) * GW + clamp(x, 0, GW - 1)];
-function assignZones() {                          // 미로를 네 구역으로 (보로노이)
+function assignZones() { zoneMap = new Uint8Array(GW * GH).fill(STAGES[S.stage].zone); }   // 방 전체가 하나의 장소
+function assignZonesVoronoi() {                   // (예전 방식: 한 미로를 네 구역으로)
   zoneMap = new Uint8Array(GW * GH);
   const q = [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]].map(([a, b]) => [a * GW + rand(-3, 3), b * GH + rand(-3, 3)]);
   const ids = [0, 1, 2, 3].sort(() => Math.random() - .5);
@@ -771,7 +779,7 @@ const sfx = {
   }
 };
 // 괴물마다 따로 들리는 숨소리/으르렁거림 (위치에 따라 들림)
-const voices = [];
+const voices = {};
 function makeVoice(v) {
   const p = panner(new THREE.Vector3()); p.refDistance = 1.2; p.rolloffFactor = 1.6; out(p, 0.35);
   const g = ac.createGain(); g.gain.value = 0; g.connect(p);
@@ -786,13 +794,13 @@ function makeVoice(v) {
 }
 function setVoice(m, pos, vol, rate) {
   if (!ac || !m.cfg.voice) return;
-  const V = voices[m.idx] || (voices[m.idx] = makeVoice(m.cfg.voice));
+  const k = m.mesh.userData.vkey, V = voices[k] || (voices[k] = makeVoice(m.cfg.voice));
   const t = ac.currentTime, P = V.p;
   if (P.positionX) { P.positionX.setTargetAtTime(pos.x, t, 0.05); P.positionY.setTargetAtTime(pos.y, t, 0.05); P.positionZ.setTargetAtTime(pos.z, t, 0.05); }
   else P.setPosition(pos.x, pos.y, pos.z);
   V.g.gain.setTargetAtTime(vol, t, 0.2); V.lfo.frequency.setTargetAtTime(rate, t, 0.3);
 }
-function silenceVoices() { if (!ac) return; voices.forEach(V => V && V.g.gain.setTargetAtTime(0, ac.currentTime, 0.1)); }
+function silenceVoices() { if (!ac) return; Object.values(voices).forEach(V => V && V.g.gain.setTargetAtTime(0, ac.currentTime, 0.1)); }
 // 하얀 인형이 움직일 때: 돌/도자기가 바닥을 긁는 소리
 sfx.scrape = pos => {
   if (!ac) return; const t = ac.currentTime, p = panner(pos); out(p, 0.5);
@@ -1527,25 +1535,38 @@ const BOSS_LINES = {
   moon: ['"...숨소리가 들려."', '"...어둠은 내 거야."', '"...심장 소리가 너무 커."', '"...움직여 봐. 한 번만."']
 };
 const BOSS_RED = '#c8322a';
-// 등장 순서: 시간이 지나거나 퓨즈를 모을수록 하나씩 깨어난다
-const ROSTER = [
-  { type: 'stalker', wake: { t: 9, f: 0 }, msg: '...어딘가에서 무언가 깨어났다' },
-  { type: 'listener', wake: { t: 0, f: 1 }, msg: '딸깍, 딸깍... 무언가 소리를 더듬으며 깨어났다' },
-  { type: 'watcher', wake: { t: 0, f: 2 }, msg: '등 뒤 어딘가에서 돌이 바닥을 긁는 소리가 났다' },
-  { type: 'shade', wake: { t: 50, f: 1 }, delay: 0, msg: '차가운 바람이 스쳤다. 어둠 속에서 무언가 숨을 쉰다' },
-  { type: 'crawler', wake: { t: 0, f: 3 }, msg: '머리 위 어딘가에서 수많은 다리가 사각거린다' },
-  { type: 'mass', wake: { t: 0, f: 4 }, msg: '축축하고 무거운 것이 바닥을 끌며 깨어났다. 그것은 당신이 어디 있는지 안다' },
-  { type: 'stalker', wake: { t: 0, f: 4 }, delay: 14, msg: '또 하나가 깨어났다. 이번엔 더 가까이에서', scale: 1.12 },
-  { type: 'boss', wake: { t: 0, f: 5 }, delay: 3.5, msg: '바닥 아래에서... 쇠가 긁히는 소리가 올라온다' }
+/* ---------- 네 개의 방 ---------- */
+// 방마다 장소(구역), 미로 크기, 필요한 퓨즈, 등장하는 괴물(깨어나는 조건: t=그 방에 들어온 뒤 초, f=모은 퓨즈)
+const STAGES = [
+  { name: '병동', zone: 0, size: 9, fuses: 3, line: '차가운 병동. 누군가 이곳에 아주 오래 갇혀 있었다.',
+    roster: [{ type: 'stalker', wake: { t: 9, f: 0 } }, { type: 'listener', wake: { t: 0, f: 2 } }] },
+  { name: '놀이방', zone: 1, size: 9, fuses: 3, kids: true, line: '아이들의 웃음소리가 아직 벽 속에 남아 있다.',
+    roster: [{ type: 'watcher', wake: { t: 8, f: 0 } }, { type: 'shade', wake: { t: 30, f: 1 }, delay: 0 }, { type: 'stalker', wake: { t: 0, f: 2 } }] },
+  { name: '기계실', zone: 2, size: 10, fuses: 4, blackoutAt: 3, line: '쇳덩이가 숨 쉬는 소리. 빛을 끄는 편이 나을지도 모른다.',
+    roster: [{ type: 'crawler', wake: { t: 8, f: 0 } }, { type: 'listener', wake: { t: 0, f: 1 } }, { type: 'mass', wake: { t: 0, f: 2 } }] },
+  { name: '무너진 곳', zone: 3, size: 11, fuses: 4, final: true, line: '여기가 끝이다. 그리고 그것이 기다리고 있다.',
+    roster: [{ type: 'stalker', wake: { t: 8, f: 0 }, scale: 1.12 }, { type: 'mass', wake: { t: 0, f: 1 } }, { type: 'shade', wake: { t: 0, f: 2 }, delay: 0 }, { type: 'boss', wake: { t: 0, f: 4 }, delay: 3.5 }] }
 ];
+const WAKE_MSG = {
+  stalker: '...어딘가에서 무언가 깨어났다', listener: '딸깍, 딸깍... 무언가 소리를 더듬으며 깨어났다',
+  watcher: '등 뒤 어딘가에서 돌이 바닥을 긁는 소리가 났다', shade: '차가운 바람이 스쳤다. 어둠 속에서 무언가 숨을 쉰다',
+  crawler: '머리 위 어딘가에서 수많은 다리가 사각거린다', mass: '축축하고 무거운 것이 바닥을 끌며 깨어났다. 그것은 당신이 어디 있는지 안다',
+  boss: '바닥 아래에서... 쇠가 긁히는 소리가 올라온다'
+};
+let ROSTER = STAGES[0].roster;
 const shadowAll = o => o.traverse(c => { if (c.isMesh && !(c.material && c.material.transparent)) c.castShadow = true; });
-const monsterMeshes = ROSTER.map(r => {
-  const T = MTYPES[r.type], m = T.build ? T.build() : makeMonster({ ...T.model, ...(r.scale ? { scale: r.scale } : {}) });
-  scene.add(m); return m;
-});
+// 괴물 모델은 처음 필요할 때 만들어 두고 다시 쓴다
+const meshCache = {};
+function meshFor(type, n, scale) {
+  const key = type + '#' + n + (scale ? '@' + scale : '');
+  if (!meshCache[key]) {
+    const T = MTYPES[type], m = T.build ? T.build() : makeMonster({ ...T.model, ...(scale ? { scale } : {}) });
+    shadowAll(m); m.visible = false; m.userData.vkey = key; scene.add(m); meshCache[key] = m;
+  }
+  return meshCache[key];
+}
 // 아이 귀신 (해치지 않는다. 막다른 곳에서 벽을 보고 울고 있다)
 const kidMeshes = [0, 1, 2].map(() => { const k = makeMonster({ scale: 0.5, mouth: [0.5, 0.9, 0.4] }); k.visible = false; shadowAll(k); scene.add(k); return k; });
-monsterMeshes.forEach(shadowAll);
 const ghostMesh = makeMonster(); // 환영 (복도 끝, 등 뒤에 나타났다 사라짐)
 ghostMesh.visible = false; shadowAll(ghostMesh); scene.add(ghostMesh);
 const G = { active: null, t: 30, behindDone: false };
@@ -1905,7 +1926,7 @@ let world = null, items = [], lamps = [], exitDoor = null, exitBlock = null, exi
 const S = { // 게임 상태
   state: 'menu', time: 0, fuses: 0, doorOpen: false, doorT: 0,
   player: { pos: new THREE.Vector3(), yaw: 0, pitch: 0, stamina: 100, exhausted: false, battery: 100, flash: true, bob: 0, moving: false, sprinting: false, sneaking: false, crouch: 0 },
-  monsters: [], kids: [], killer: null, wakeT: 0, heartT: 0, breathT: 0, whisperT: 25, bangT: 14, deathT: 0, introShown: false,
+  monsters: [], kids: [], killer: null, stage: 0, entry: 'new', totalTime: 0, transT: 0, stageBattery: 100, wakeT: 0, heartT: 0, breathT: 0, whisperT: 25, bangT: 14, deathT: 0, introShown: false,
   fear: 0, glitch: 0, blackout: 0, followT: 40, followN: 0, followStepT: 0, followD: 5, bossDist: 99, shake: 0, musicTarget: 0
 };
 
@@ -1916,6 +1937,10 @@ function disposeWorld() {
 }
 function buildWorld() {
   disposeWorld();
+  const ST = STAGES[S.stage];
+  ROSTER = ST.roster; MW = MH = ST.size; GW = MW * 2 + 1; GH = MH * 2 + 1; FUSE_COUNT = ST.fuses;
+  exitTile.x = GW - 1; exitTile.z = GH - 2;
+  [cT.map, cT.bump].forEach(t => t.repeat.set((GW + 2) / 2, (GW + 2) / 2));
   generateMaze();
   world = new THREE.Group(); scene.add(world);
   items = []; lamps = [];
@@ -1963,7 +1988,7 @@ function buildWorld() {
     map: canvasTex(128, (g, s) => { g.fillStyle = '#6b706a'; g.fillRect(0, 0, s, s); speckle(g, s, .15, 2500); stains(g, s, 8, 'rgba(70,35,10,.55)', .3); g.fillStyle = '#2b2b2b'; g.fillRect(s * .78, s * .48, s * .12, s * .05); }) });
   exitDoor = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.3, 1.5), doorMat);
   exitDoor.position.set(exitTile.x * TILE - 0.06, 1.15, ec.z); world.add(exitDoor);
-  exitSignMat = new THREE.MeshBasicMaterial({ map: signTex('비상구', '#300', '#ff3b2f'), fog: false });
+  exitSignMat = new THREE.MeshBasicMaterial({ map: signTex(ST.final ? '비상구' : '다음 방', '#300', '#ff3b2f'), fog: false });
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.34), exitSignMat);
   sign.position.set(exitTile.x * TILE - 0.02, 2.62, ec.z); sign.rotation.y = -Math.PI / 2; world.add(sign);
   exitLight = new THREE.PointLight(0xff2a1a, 1.2, 5, 1.5); exitLight.position.set(exitTile.x * TILE - 0.6, 2.5, ec.z); world.add(exitLight);
@@ -1986,7 +2011,8 @@ function buildWorld() {
   // 눈을 뜬 방: 바닥의 얼룩진 매트리스, 머리 위의 깜빡이는 등
   const mattress = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.16, 2.0), new THREE.MeshStandardMaterial({ roughness: 1,
     map: canvasTex(128, (c, s) => { c.fillStyle = '#8c8574'; c.fillRect(0, 0, s, s); c.strokeStyle = 'rgba(40,35,25,.5)'; for (let i = 0; i < s; i += 16) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i, s); c.stroke(); } stains(c, s, 10, 'rgba(60,42,18,.6)', .35); stains(c, s, 3, 'rgba(95,6,6,.85)', .2); }) }));
-  const mpos = tileCenter(1, 1); mattress.position.set(mpos.x - 0.35, 0.08, mpos.z - 0.1); mattress.rotation.y = 0.08; world.add(mattress);
+  const mpos = tileCenter(1, 1); mattress.position.set(mpos.x - 0.35, 0.08, mpos.z - 0.1); mattress.rotation.y = 0.08;
+  if (S.stage === 0) world.add(mattress);
   { const sl = new THREE.PointLight(0xffd59a, 3.2, 7, 1.6), sp2 = tileCenter(2, 2); sl.position.set(sp2.x, WALL_H - 0.35, sp2.z);
     const bm = new THREE.MeshBasicMaterial({ color: 0xffe3b0 }), bulb = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.05, 0.18), bm);
     bulb.position.set(sp2.x, WALL_H - 0.03, sp2.z); world.add(sl, bulb); lamps.push({ light: sl, bulbMat: bm, base: 3.2, off: 0, t: 2 }); }
@@ -2019,18 +2045,23 @@ function buildWorld() {
     world.add(decal); wi++;
   }
 
-  // 플레이어: 매트리스 위에 누운 채로 시작
+  // 플레이어: 처음엔 매트리스 위에 누운 채로, 다음 방부터는 문 앞에 선 채로 시작
   const pl = S.player;
-  pl.pos.set(mpos.x - 0.35, EYE, mpos.z + 0.3);
-  pl.yaw = Math.PI * 0.75; pl.pitch = 0;
-  pl.stamina = 100; pl.battery = 100; pl.flash = false; pl.exhausted = false; pl.crouch = 0; pl.sneaking = false;
+  if (S.entry === 'new') { pl.pos.set(mpos.x - 0.35, EYE, mpos.z + 0.3); pl.yaw = Math.PI * 0.75; pl.battery = 100; pl.flash = false; }
+  else { const c = tileCenter(1, 2); pl.pos.set(c.x, EYE, c.z); pl.yaw = -Math.PI / 2; pl.flash = true; pl.battery = S.entry === 'retry' ? (S.stageBattery ?? 100) : Math.max(55, pl.battery); }
+  S.stageBattery = pl.battery;
+  pl.pitch = 0; pl.stamina = 100; pl.exhausted = false; pl.crouch = 0; pl.sneaking = false;
 
   // 괴물들: 출발점에서 멀고, 서로 떨어진 곳에 잠들어 있다
   const spawnCells = [];
-  const sc = cells.filter(c => c.d > 12 && !used.has(c.x + ',' + c.z)).sort((a, b) => b.d - a.d);
+  let sc = cells.filter(c => c.d > 12 && !used.has(c.x + ',' + c.z)).sort((a, b) => b.d - a.d);
+  if (sc.length < ROSTER.length) sc = cells.filter(c => c.d > 4).sort((a, b) => b.d - a.d);
+  Object.values(meshCache).forEach(m => { m.visible = false; });
+  const typeN = {};
   for (const md of [10, 7, 5, 3, 0]) for (const c of sc) { if (spawnCells.length >= ROSTER.length) break; if (far(c, spawnCells, md) && !spawnCells.includes(c)) spawnCells.push(c); }
   S.monsters = ROSTER.map((r, idx) => {
-    const c = spawnCells[idx % spawnCells.length], mp = tileCenter(c.x, c.z), mesh = monsterMeshes[idx], ud = mesh.userData;
+    const n = typeN[r.type] = (typeN[r.type] ?? -1) + 1;
+    const c = spawnCells[idx % spawnCells.length], mp = tileCenter(c.x, c.z), mesh = meshFor(r.type, n, r.scale), ud = mesh.userData;
     const cfg = MTYPES[r.type];
     mesh.position.set(mp.x, 0, mp.z); mesh.rotation.set(0, rand(0, Math.PI * 2), 0); mesh.visible = cfg.kind !== 'shade' && cfg.kind !== 'boss';
     if (ud.reset) ud.reset();
@@ -2038,19 +2069,21 @@ function buildWorld() {
       ud.mouth.scale.set(...ud.mouthBase); ud.body.rotation.x = 0.5; ud.body.position.y = 0;
       ud.arms.forEach(a => { a.sh.rotation.x = 0; a.fore.rotation.x = 0; }); ud.legs.forEach(l => { l.rotation.x = 0; }); ud.head.rotation.set(0.6, 0, 0.3);
     }
-    return { idx, cfg, kind: cfg.kind || 'hunter', type: r.type, wake: r.wake, msg: r.msg, mesh, pos: new THREE.Vector3(mp.x, 0, mp.z), path: [], state: 'dormant', dormant: idx === 0 ? 0 : (r.delay ?? 2.5),
+    return { idx, cfg, kind: cfg.kind || 'hunter', type: r.type, wake: r.wake, msg: r.msg ?? WAKE_MSG[r.type], mesh, pos: new THREE.Vector3(mp.x, 0, mp.z), path: [], state: 'dormant', dormant: idx === 0 ? 0 : (r.delay ?? 2.5),
       chaseT: 0, repath: 0, stepT: 0, lastKnown: null, searchT: 0, dir: new THREE.Vector3(0, 0, 1), anim: 0, jerkT: 0, clickT: rand(1, 3), watched: false, poseT: 0, mode: 'sun', spinT: 0, riseT: 0, noteI: 0, noteT: 0, lineT: 8, breathT: 0, grabT: 0, grabCD: 0, stareT: 0, heading: rand(0, 6.28), curSpeed: 0, spd: 0, moveDist: 0, lookX: 0, lookY: 0, tw: new THREE.Vector3(), hitT: 0, goneT: 0, fade: 1, whisperT: rand(4, 8) };
   });
   S.killer = null;
 
   // 아이 귀신: 막다른 곳에서 벽을 향해 서 있다
-  const deadEnds = cells.filter(c => c.dead && c.d > 6 && !used.has(c.x + ',' + c.z)).sort(() => Math.random() - .5);
+  // (막다른 곳이 모자라면 벽에 붙은 아무 칸이나)
+  const shuffled = arr => arr.sort(() => Math.random() - .5);
+  const kidCand = [...shuffled(cells.filter(c => c.dead && c.d > 6)), ...shuffled(cells.filter(c => !c.dead && c.d > 6))].filter(c => !used.has(c.x + ',' + c.z) && DIRS.some(([dx, dz]) => isWallTile(c.x + dx, c.z + dz)));
   const kidCells = [];
-  for (const c of deadEnds) { if (kidCells.length >= kidMeshes.length) break; if (far(c, kidCells, 8)) kidCells.push(c); }
+  if (ST.kids) for (const md of [8, 5, 3]) for (const c of kidCand) { if (kidCells.length >= kidMeshes.length) break; if (!kidCells.includes(c) && far(c, kidCells, md)) kidCells.push(c); }
   kidMeshes.forEach(k => { k.visible = false; });
   S.kids = kidCells.map((c, i) => {
-    const [ox, oz] = DIRS.find(([dx, dz]) => !isWallTile(c.x + dx, c.z + dz)), p = tileCenter(c.x, c.z), mesh = kidMeshes[i], ud = mesh.userData;
-    mesh.position.set(p.x - ox * 0.75, 0, p.z - oz * 0.75); mesh.rotation.set(0, Math.atan2(-ox, -oz), 0); mesh.visible = true;
+    const [wx, wz] = DIRS.find(([dx, dz]) => isWallTile(c.x + dx, c.z + dz)), p = tileCenter(c.x, c.z), mesh = kidMeshes[i], ud = mesh.userData;
+    mesh.position.set(p.x + wx * 0.75, 0, p.z + wz * 0.75); mesh.rotation.set(0, Math.atan2(wx, wz), 0); mesh.visible = true;
     ud.body.rotation.x = 0.12; ud.head.rotation.set(0.55, 0, 0.1); ud.arms.forEach(a => { a.sh.rotation.x = -0.3; a.fore.rotation.x = -1.2; }); ud.legs.forEach(l => l.rotation.x = 0);
     return { mesh, state: 'idle', t: 0, cryT: rand(0, 3), seen: 0 };
   });
@@ -2171,6 +2204,7 @@ function setPlayingUI(on) {
 }
 function startGame() {
   initAudio();
+  S.stage = 0; S.entry = 'new'; S.totalTime = 0;
   buildWorld();
   $('startScreen').classList.add('hidden'); $('endScreen').classList.add('hidden');
   if (isTouch) { $('tFlash').classList.remove('on'); touch.run = touch.sneak = false; $('tRun').classList.remove('on'); $('tSneak').classList.remove('on'); }
@@ -2204,7 +2238,40 @@ function updateWaking(dt) {
   if (t >= WAKE_LEN) {
     $('eyelid').style.opacity = 0; renderer.domElement.style.filter = '';
     S.state = 'playing'; setPlayingUI(true); clock.getDelta();
-    showMsg('손에 손전등이 쥐어져 있다. 벽에 긁힌 글씨 — "퓨즈 5개. 출구. 깨우지 마."', 5);
+    showMsg(`손에 손전등이 쥐어져 있다. 벽에 긁힌 글씨 — "퓨즈 ${FUSE_COUNT}개. 문. 깨우지 마."`, 5);
+  }
+}
+// 다음 방으로: 어두워졌다가, 방 이름이 떠오르고, 새 방에서 눈을 뜬다
+function nextStage() {
+  S.totalTime += S.time; S.state = 'transition'; S.transT = 0; S.musicTarget = 0;
+  silenceVoices(); hideGhost(false); setPlayingUI(false); sfx.door();
+}
+function startStage(entry) {
+  S.entry = entry; buildWorld(); hideGhost(false);
+  $('endScreen').classList.add('hidden'); $('eyelid').style.opacity = 1;
+  const card = $('stageCard'), ST = STAGES[S.stage];
+  card.querySelector('.num').textContent = `${S.stage + 1} 번 째  방`;
+  card.querySelector('.name').textContent = ST.name; card.querySelector('.line').textContent = ST.line;
+  if (isTouch) { $('tFlash').classList.add('on'); touch.run = touch.sneak = false; $('tRun').classList.remove('on'); $('tSneak').classList.remove('on'); }
+  S.state = 'stageIntro'; S.transT = 0; setPlayingUI(false);
+  if (!isTouch) requestLock();
+}
+function updateTransition(dt) {
+  S.transT += dt; const pl = S.player;
+  camera.position.set(pl.pos.x + dt, EYE, pl.pos.z); pl.pos.x += dt * 1.2;            // 문 안으로 걸어 들어간다
+  $('eyelid').style.opacity = Math.min(1, S.transT / 1.2).toFixed(3);
+  if (S.transT >= 1.3) { S.stage++; startStage('next'); }
+}
+function updateStageIntro(dt) {
+  S.transT += dt; const t = S.transT, pl = S.player;
+  camera.position.set(pl.pos.x, EYE, pl.pos.z); camera.rotation.set(pl.pitch, pl.yaw, 0);
+  $('stageCard').style.opacity = (t < 0.6 ? t / 0.6 : t < 2.6 ? 1 : Math.max(0, 1 - (t - 2.6) / 0.6)).toFixed(3);
+  $('eyelid').style.opacity = (t < 2.8 ? 1 : Math.max(0, 1 - (t - 2.8) / 0.9)).toFixed(3);
+  updateEnvironment(dt);
+  if (t >= 3.7) {
+    $('stageCard').style.opacity = 0; $('eyelid').style.opacity = 0;
+    S.state = 'playing'; setPlayingUI(true); clock.getDelta();
+    showMsg(`퓨즈 ${FUSE_COUNT}개를 찾아 ${STAGES[S.stage].final ? '마지막 문' : '다음 문'}을 열어야 한다`, 4);
   }
 }
 function pause() {
@@ -2221,25 +2288,27 @@ function resume() {
 function endGame(win) {
   S.state = 'over'; setPlayingUI(false); silenceVoices(); hideGhost(false); $('msg').style.opacity = 0;
   if (document.pointerLockElement) document.exitPointerLock();
-  const mm = Math.floor(S.time / 60), ss = String(Math.floor(S.time % 60)).padStart(2, '0');
+  const tot = (S.totalTime || 0) + S.time, mm = Math.floor(tot / 60), ss = String(Math.floor(tot % 60)).padStart(2, '0');
   const t = $('endTitle');
+  $('restartBtn').style.display = win ? 'none' : ''; $('fromStartBtn').textContent = win ? '다시 하기' : '처음부터';
   if (win) {
     t.textContent = '탈출했다'; t.style.color = '#d8d2c4';
     $('endStats').innerHTML = `문 너머는 눈부시게 하얀 빛이었다.<br>등 뒤에서, 쇠 손가락이 문틀을 긁는 소리가 끝없이 이어졌다.<br>뒤를 돌아보자, 방금 나온 문이 사라지고 없었다.<br>...정말 나온 걸까?<br><br>탈출 시간 ${mm}:${ss}`;
   } else {
     t.textContent = '잡혔다'; t.style.color = '#b31212';
     const who = S.killer ? NAMES[S.killer.type] : '그것';
-    $('endStats').innerHTML = `${who}에게 잡혔다.<br>그리고 당신은... 다시 그 방에서 눈을 뜬다.<br><br>찾은 퓨즈 ${S.fuses} / ${FUSE_COUNT} · 버틴 시간 ${mm}:${ss}`;
+    $('endStats').innerHTML = `${S.stage + 1}번째 방, ${STAGES[S.stage].name}에서 ${who}에게 잡혔다.<br>그리고 당신은... 다시 그 방에서 눈을 뜬다.<br><br>찾은 퓨즈 ${S.fuses} / ${FUSE_COUNT} · 버틴 시간 ${mm}:${ss}`;
   }
   $('endScreen').classList.remove('hidden');
 }
 $('startBtn').addEventListener('click', startGame);
-$('restartBtn').addEventListener('click', startGame);
+$('restartBtn').addEventListener('click', () => { initAudio(); S.totalTime = S.totalTime || 0; startStage('retry'); });
+$('fromStartBtn').addEventListener('click', startGame);
 $('resumeBtn').addEventListener('click', resume);
 addEventListener('keydown', e => { if (e.code === 'KeyP' && S.state === 'playing') { if (document.pointerLockElement) document.exitPointerLock(); else pause(); } });
 
 function updateHUD() {
-  $('fuses').textContent = `퓨즈 ${S.fuses} / ${FUSE_COUNT}`;
+  $('fuses').textContent = `${S.stage + 1}/4 ${STAGES[S.stage].name} · 퓨즈 ${S.fuses} / ${FUSE_COUNT}`;
   const pl = S.player;
   $('batt').style.width = pl.battery + '%';
   $('batt').style.background = pl.battery < 20 ? '#c4473a' : '#e8dcb0';
@@ -2313,12 +2382,12 @@ function updatePlayer(dt) {
       if (it.type === 'fuse') {
         S.fuses++;
         if (S.fuses >= FUSE_COUNT) openExit();
-        else if (S.fuses === 3) {
+        else if (S.fuses === STAGES[S.stage].blackoutAt) {
           lamps.forEach(L => { L.dead = true; }); S.blackout = 1.4; S.glitch = 0.8;
           sfx.bang(new THREE.Vector3(pl.pos.x + 3, 1.5, pl.pos.z + 3)); sfx.hit();
           setTimeout(() => showMsg('모든 불이 꺼졌다...', 2.4), 900);
         }
-        if (S.fuses < 3 || S.fuses === 4) showMsg(`퓨즈를 찾았다 (${S.fuses} / ${FUSE_COUNT})`);
+        if (S.fuses < FUSE_COUNT && S.fuses !== STAGES[S.stage].blackoutAt) showMsg(`퓨즈를 찾았다 (${S.fuses} / ${FUSE_COUNT})`);
       } else {
         pl.battery = Math.min(100, pl.battery + 45); showMsg('배터리를 주웠다');
       }
@@ -2326,15 +2395,15 @@ function updatePlayer(dt) {
   }
 
   // 탈출
-  if (S.doorOpen && pl.pos.x > exitTile.x * TILE + 0.4) endGame(true);
+  if (S.doorOpen && pl.pos.x > exitTile.x * TILE + 0.4) { if (STAGES[S.stage].final) endGame(true); else nextStage(); return; }
   updateHUD();
 }
 function openExit() {
   S.doorOpen = true; grid[exitTile.z][exitTile.x] = 0;
-  exitSignMat.map = signTex('비상구', '#032', '#3bff6a'); exitSignMat.needsUpdate = true;
+  exitSignMat.map = signTex(STAGES[S.stage].final ? '비상구' : '다음 방', '#032', '#3bff6a'); exitSignMat.needsUpdate = true;
   exitLight.color.set(0x3bff6a); exitLight.intensity = 3;
   sfx.door();
-  showMsg('멀리서 철문이 열리는 소리가 들렸다. 초록 불빛을 따라가라!', 4.5);
+  showMsg(STAGES[S.stage].final ? '멀리서 철문이 열리는 소리가 들렸다. 마지막 문이다. 초록 불빛을 따라가라!' : '어딘가에서 다음 방으로 가는 문이 열렸다. 초록 불빛을 따라가라!', 4.5);
   // 깨어 있는 모든 것이 소리를 듣고 달려온다 (잠든 것까지 깨어난다)
   for (const m of S.monsters) {
     if (m.kind === 'boss') continue;
@@ -2999,6 +3068,10 @@ function loop() {
     if (S.state === 'playing') { updateEnvironment(dt); updateGhost(dt); updateFollowSteps(dt); updateKids(dt); }
   } else if (S.state === 'waking') {
     updateWaking(dt);
+  } else if (S.state === 'transition') {
+    updateTransition(dt);
+  } else if (S.state === 'stageIntro') {
+    updateStageIntro(dt);
   } else if (S.state === 'dying') {
     updateDying(dt);
   } else if (S.state === 'menu') {
