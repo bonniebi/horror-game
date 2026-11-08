@@ -113,7 +113,7 @@
         — 검은 그림자는 어둠 속에서 벽을 지나 다가온다. 빛을 싫어한다<br>
         — 살덩어리는 느리다. 하지만 언제나 당신이 어디 있는지 안다<br>
         — 아이 울음소리가 들려도, 따라가지 마라<br>
-        <em>— 그리고 마지막에 오르골 소리가 들리면... 선생님이 온다</em>
+        <em>— 그리고 마지막에, 쇠 긁는 소리가 들리면... 이미 늦었다</em>
       </span>
     </p>
     <div class="keys" id="keysDesktop">
@@ -582,13 +582,33 @@ sfx.squelch = pos => {
   const n = noiseSrc(), lp = filt('lowpass', 500, 6), g = envGain(t, 0.03, 0.8, 0.4);
   lp.frequency.exponentialRampToValueAtTime(150, t + 0.4); n.connect(lp); lp.connect(g); g.connect(p); n.start(t); n.stop(t + 0.5);
 };
-// 해님달님 선생님: 망가진 오르골 한 음
+// 기워진 것: 늘어진 오르골 한 음
 sfx.musicNote = (pos, f) => {
   if (!ac) return; const t = ac.currentTime, p = panner(pos); p.refDistance = 3; p.rolloffFactor = 1.1; out(p, 0.8);
   f *= rand(0.965, 1.0);                                    // 음이 살짝씩 어긋난다
   for (const [mul, type, v] of [[1, 'triangle', 0.22], [2.01, 'sine', 0.08], [3.98, 'sine', 0.03]]) {
     const o = osc(type, f * mul), g = envGain(t, 0.004, v, 0.9);
     o.frequency.linearRampToValueAtTime(f * mul * 0.985, t + 0.9); o.connect(g); g.connect(p); o.start(t); o.stop(t + 1);
+  }
+};
+// 집게팔이 튀어나올 때의 쇳소리 비명
+sfx.screech = pos => {
+  if (!ac) return; const t = ac.currentTime, p = panner(pos); p.refDistance = 4; out(p, 0.6);
+  for (const f0 of [1700, 2350, 3100]) {
+    const o = osc('sawtooth', f0), bp = filt('bandpass', f0, 14), g = envGain(t, 0.01, 0.35, 0.55);
+    o.frequency.linearRampToValueAtTime(f0 * rand(1.15, 1.35), t + 0.5); o.connect(bp); bp.connect(g); g.connect(p); o.start(t); o.stop(t + 0.6);
+  }
+  const n = noiseSrc(), hp = filt('highpass', 2500), ng = envGain(t, 0.005, 0.5, 0.45); n.connect(hp); hp.connect(ng); ng.connect(p); n.start(t); n.stop(t + 0.5);
+};
+// 젖은 쇳덩이 같은 거친 숨소리
+sfx.bigBreath = (pos, fast) => {
+  if (!ac) return; const t = ac.currentTime, p = panner(pos); p.refDistance = 2.5; out(p, 0.5);
+  const dur = fast ? 0.7 : 1.5;
+  for (const [st, pk] of [[0, 0.55], [dur * 0.55, 0.4]]) {
+    const n = noiseSrc(), lp = filt('lowpass', fast ? 900 : 600, 3), g = envGain(t + st, dur * 0.2, pk, dur * 0.35);
+    n.connect(lp); lp.connect(g); g.connect(p); n.start(t + st); n.stop(t + st + dur * 0.6);
+    const o = osc('sawtooth', rand(42, 55)), og = envGain(t + st, dur * 0.2, pk * 0.35, dur * 0.35), olp = filt('lowpass', 220, 3);
+    o.connect(olp); olp.connect(og); og.connect(p); o.start(t + st); o.stop(t + st + dur * 0.6);
   }
 };
 // 머리가 돌아가는 톱니 소리
@@ -890,178 +910,150 @@ function makeShade() {
   return g;
 }
 
-// 해님달님 선생님: 버려진 놀이방 마스코트. 녹슨 쇠 뼈대에 찢어진 인형 가죽,
-// 한쪽은 해, 한쪽은 달이 그려진 금 간 도자기 얼굴이 목 위에서 빙글 돈다
-function bossFaceTex(kind) {
-  const c = document.createElement('canvas'); c.width = c.height = 512;
-  const g = c.getContext('2d'), s = 512, C = 256;
-  g.save(); g.beginPath(); g.arc(C, C, 254, 0, Math.PI * 2); g.clip();
-  const crack = (n, col, w) => {
-    g.strokeStyle = col; g.lineWidth = w;
-    for (let i = 0; i < n; i++) {
-      const a = rand(0, Math.PI * 2); let x = C + Math.cos(a) * 250, y = C + Math.sin(a) * 250; g.beginPath(); g.moveTo(x, y);
-      for (let j = 0; j < 7; j++) { x += (C - x) * 0.18 + rand(-26, 26); y += (C - y) * 0.18 + rand(-26, 26); g.lineTo(x, y); }
-      g.stroke();
-    }
-  };
-  if (kind === 'sun') {
-    const gr = g.createRadialGradient(C, C * 0.85, 30, C, C, 260); gr.addColorStop(0, '#f4e7c9'); gr.addColorStop(1, '#a8884f');
-    g.fillStyle = gr; g.fillRect(0, 0, s, s);
-    stains(g, s, 2, 'rgba(220,90,90,.55)', .12);                       // 볼터치
-    for (const [sx, px, py] of [[-1, 9, 7], [1, -15, -12]]) {           // 커다란 눈, 바늘 같은 동공 (서로 다른 곳을 본다)
-      const ex = C + sx * 96, ey = 205;
-      g.fillStyle = '#fbf5e6'; g.strokeStyle = '#1b130d'; g.lineWidth = 9;
-      g.beginPath(); g.ellipse(ex, ey, 62, 76, 0, 0, Math.PI * 2); g.fill(); g.stroke();
-      g.fillStyle = '#7a0000'; g.beginPath(); g.arc(ex + px, ey + py, 10, 0, Math.PI * 2); g.fill();
-      g.fillStyle = '#000'; g.beginPath(); g.arc(ex + px, ey + py, 4, 0, Math.PI * 2); g.fill();
-      g.lineWidth = 5; for (let k = 0; k < 6; k++) { const a = -Math.PI * (0.15 + k * 0.14); g.beginPath(); g.moveTo(ex + Math.cos(a) * 64, ey + Math.sin(a) * 78); g.lineTo(ex + Math.cos(a) * 88, ey + Math.sin(a) * 104); g.stroke(); }
-    }
-    // 귀까지 찢어진 웃음
-    g.fillStyle = '#0a0505'; g.beginPath(); g.moveTo(52, 300); g.quadraticCurveTo(C, 330, 460, 300); g.quadraticCurveTo(C, 520, 52, 300); g.fill();
-    g.fillStyle = '#e8dcc0';
-    for (let i = 0; i < 15; i++) { const x = 80 + i * 24; g.beginPath(); g.moveTo(x - 10, 312 + Math.abs(i - 7) * -1.5); g.lineTo(x + 10, 312 + Math.abs(i - 7) * -1.5); g.lineTo(x, 345 - Math.abs(i - 7) * 2); g.fill(); }
-    for (let i = 0; i < 11; i++) { const x = 130 + i * 25, y = 440 - Math.abs(i - 5) * 9; g.beginPath(); g.moveTo(x - 9, y); g.lineTo(x + 9, y); g.lineTo(x, y - 26); g.fill(); }
-    g.strokeStyle = 'rgba(120,0,0,.9)'; g.lineWidth = 4;              // 입꼬리에서 이어지는 칼자국
-    g.beginPath(); g.moveTo(52, 300); g.lineTo(8, 270); g.moveTo(460, 300); g.lineTo(505, 262); g.stroke();
-    drips(g, s, 10, '110,0,0', 330);
-  } else {
-    const gr = g.createRadialGradient(C, C, 30, C, C, 260); gr.addColorStop(0, '#4c5672'); gr.addColorStop(1, '#141826');
-    g.fillStyle = gr; g.fillRect(0, 0, s, s);
-    // 초승달
-    g.fillStyle = '#c9cfdc'; g.beginPath(); g.arc(C - 20, C, 210, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#262c40'; g.beginPath(); g.arc(C + 75, C - 20, 200, 0, Math.PI * 2); g.fill();
-    // 초승달 위의 감은 눈
-    g.strokeStyle = '#1b1d28'; g.lineWidth = 7; g.beginPath(); g.arc(150, 215, 40, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke();
-    for (let k = 0; k < 5; k++) { const a = Math.PI * (0.2 + k * 0.15); g.beginPath(); g.moveTo(150 + Math.cos(a) * 40, 215 + Math.sin(a) * 40); g.lineTo(150 + Math.cos(a) * 58, 215 + Math.sin(a) * 58); g.stroke(); }
-    // 어둠 쪽에 진짜로 뜬 눈 하나 (충혈)
-    g.fillStyle = '#efe9dc'; g.beginPath(); g.ellipse(335, 215, 52, 44, 0, 0, Math.PI * 2); g.fill();
-    g.strokeStyle = 'rgba(160,10,10,.8)'; g.lineWidth = 2;
-    for (let k = 0; k < 14; k++) { const a = rand(0, Math.PI * 2); g.beginPath(); g.moveTo(335 + Math.cos(a) * 50, 215 + Math.sin(a) * 42); g.lineTo(335 + Math.cos(a) * rand(18, 30), 215 + Math.sin(a) * rand(14, 26)); g.stroke(); }
-    g.fillStyle = '#000'; g.beginPath(); g.arc(335, 218, 17, 0, Math.PI * 2); g.fill();
-    // 실로 꿰맨 입
-    g.strokeStyle = '#120a08'; g.lineWidth = 6; g.beginPath(); g.moveTo(130, 360); g.quadraticCurveTo(C, 395, 390, 355); g.stroke();
-    g.strokeStyle = '#6a5040'; g.lineWidth = 4;
-    for (let i = 0; i < 10; i++) { const x = 145 + i * 25, y = 362 + Math.sin((i / 9) * Math.PI) * 26; g.beginPath(); g.moveTo(x - 9, y - 12); g.lineTo(x + 9, y + 12); g.moveTo(x + 9, y - 12); g.lineTo(x - 9, y + 12); g.stroke(); }
-    drips(g, s, 8, '90,10,10', 372);
-  }
-  stains(g, s, 14, 'rgba(40,25,10,.45)', .3);
-  crack(9, '#1a120c', 3); crack(5, 'rgba(0,0,0,.6)', 7);
-  for (let i = 0; i < 5; i++) { g.fillStyle = 'rgba(30,20,12,.85)'; g.beginPath(); const x = rand(40, 470), y = rand(40, 470); g.moveTo(x, y); for (let k = 0; k < 5; k++) g.lineTo(x + rand(-22, 22), y + rand(-22, 22)); g.fill(); } // 떨어져 나간 조각
-  g.restore();
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
-}
+// 기워진 것: 버려진 장난감 공장의 잔해로 기워 만든 앙상한 거인.
+// 금 간 도자기 해골, 쇠 갈비뼈에 박힌 죽은 인형 얼굴들, 늘어나는 기계 집게팔.
+// 머리 뒤쪽에는 눈 없이 실로 꿰맨 '듣는 얼굴'이 있다
 function makeBoss() {
   const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
-  const metal = new THREE.MeshStandardMaterial({ color: 0x3b3631, metalness: 0.75, roughness: 0.45 });
-  const rust = new THREE.MeshStandardMaterial({ color: 0x5c3a24, metalness: 0.35, roughness: 0.85 });
-  const fabric = (base, stripe) => new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide, map: canvasTex(128, (c, s) => {
-    c.fillStyle = base; c.fillRect(0, 0, s, s); c.strokeStyle = stripe; c.lineWidth = 6;
-    for (let i = -s; i < s * 2; i += 26) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i + s, s); c.stroke(); }
-    speckle(c, s, 0.12, 1500); stains(c, s, 10, 'rgba(50,35,15,.6)', .35); stains(c, s, 4, 'rgba(100,4,4,.85)', .22);
-    c.strokeStyle = '#1a1410'; c.lineWidth = 2; c.setLineDash([5, 4]); c.beginPath(); c.moveTo(0, s * .5); c.lineTo(s, s * .45); c.stroke(); // 꿰맨 자국
+  const metal = new THREE.MeshStandardMaterial({ color: 0x2a2622, metalness: 0.8, roughness: 0.4 });
+  const rust = new THREE.MeshStandardMaterial({ color: 0x48291a, metalness: 0.3, roughness: 0.9 });
+  const porc = new THREE.MeshStandardMaterial({ roughness: 0.32, map: canvasTex(256, (c, s) => {
+    c.fillStyle = '#cbc1ab'; c.fillRect(0, 0, s, s); speckle(c, s, 0.12, 4000);
+    stains(c, s, 26, 'rgba(55,40,20,.55)', .3); stains(c, s, 6, 'rgba(20,12,6,.8)', .12);
+    c.strokeStyle = '#120c08'; c.lineWidth = 2;
+    for (let i = 0; i < 16; i++) { let x = rand(0, s), y = rand(0, s); c.beginPath(); c.moveTo(x, y); for (let j = 0; j < 8; j++) { x += rand(-22, 22); y += rand(-22, 22); c.lineTo(x, y); } c.stroke(); }
+    for (let i = 0; i < 7; i++) { c.fillStyle = '#0c0806'; c.beginPath(); const x = rand(0, s), y = rand(0, s); c.moveTo(x, y); for (let k = 0; k < 5; k++) c.lineTo(x + rand(-16, 16), y + rand(-16, 16)); c.fill(); }
+    drips(c, s, 12, '70,4,4', rand(0, s * 0.4));
   }) });
-  const plushY = fabric('#b7a058', 'rgba(220,200,120,.4)'), plushP = fabric('#a6757c', 'rgba(210,160,170,.4)');
-  const fluff = new THREE.MeshStandardMaterial({ color: 0xd9d2c4, roughness: 1 });
+  const doll = new THREE.MeshStandardMaterial({ color: 0xb9a893, roughness: 0.55 });
+  const hide = new THREE.MeshStandardMaterial({ roughness: 1, side: THREE.DoubleSide, map: canvasTex(128, (c, s) => {
+    c.fillStyle = '#463c2f'; c.fillRect(0, 0, s, s); speckle(c, s, 0.15, 1800);
+    stains(c, s, 10, 'rgba(15,10,6,.7)', .35); stains(c, s, 6, 'rgba(80,3,3,.9)', .25);
+    c.strokeStyle = '#0e0a07'; c.lineWidth = 2; c.setLineDash([4, 3]);
+    for (let i = 0; i < 4; i++) { c.beginPath(); c.moveTo(0, rand(0, s)); c.lineTo(s, rand(0, s)); c.stroke(); }
+  }) });
   const voidMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+  const toothMat = new THREE.MeshStandardMaterial({ color: 0xc9b98f, roughness: 0.5 });
   const add = (geo, mat, x, y, z, parent = body) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); parent.add(m); return m; };
   const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
-  // 척추와 갈비뼈
-  limb(body, V(0, 1.2, 0), V(0, 2.2, -0.06), 0.06, metal);
-  for (let i = 0; i < 7; i++) add(new THREE.SphereGeometry(0.07, 8, 6), rust, 0, 1.25 + i * 0.15, -0.03 - i * 0.004);
-  for (let i = 0; i < 5; i++) {
-    const r = add(new THREE.TorusGeometry(0.26 - Math.abs(i - 2) * 0.025, 0.018, 5, 14, Math.PI * rand(0.75, 1)), i % 2 ? metal : rust, 0, 1.6 + i * 0.12, 0.02);
-    r.rotation.set(Math.PI / 2, 0, rand(-0.2, 0.2) + Math.PI * 0);
-  }
-  // 갈비뼈에 들러붙은 찢어진 인형 가죽, 삐져나온 솜
-  for (const [x, y, z, sx, sy, sz, m] of [[0.12, 1.85, 0.12, 0.22, 0.28, 0.12, plushY], [-0.15, 1.55, 0.1, 0.2, 0.2, 0.12, plushP], [0.02, 1.35, 0.1, 0.24, 0.14, 0.12, plushY], [-0.22, 2.12, 0, 0.16, 0.12, 0.16, plushP]]) {
-    const pm = add(new THREE.SphereGeometry(1, 10, 8, 0, Math.PI * rand(1.2, 2)), m, x, y, z); pm.scale.set(sx, sy, sz); pm.rotation.set(rand(-0.4, 0.4), rand(0, 6), rand(-0.4, 0.4));
-  }
-  for (let i = 0; i < 9; i++) add(new THREE.SphereGeometry(rand(0.03, 0.06), 6, 5), fluff, rand(-0.2, 0.2), rand(1.3, 2.1), rand(0.08, 0.18));
-  // 골반, 어깨
-  add(new THREE.BoxGeometry(0.42, 0.12, 0.2), rust, 0, 1.2, 0);
-  limb(body, V(-0.42, 2.2, 0), V(0.42, 2.2, 0), 0.05, metal);
-  for (const sx of [-1, 1]) add(new THREE.SphereGeometry(0.1, 10, 8), plushY, sx * 0.43, 2.22, 0).scale.set(1.1, 0.8, 1);
-
-  // 매달린 장난감 머리들 (단추 눈, 꿰맨 입)
-  const dangles = [];
+  // 굽은 척추: 골반에서 앞으로 숙여진 목까지
+  add(new THREE.BoxGeometry(0.36, 0.14, 0.22), rust, 0, 1.3, 0);
+  const sp = [V(0, 1.3, 0), V(0, 1.6, -0.06), V(0, 1.9, -0.02), V(0, 2.12, 0.12), V(0, 2.24, 0.32)];
+  for (let i = 0; i < sp.length - 1; i++) { limb(body, sp[i], sp[i + 1], 0.05, metal); add(new THREE.SphereGeometry(0.065, 8, 6), rust, ...sp[i + 1].toArray()); }
+  // 부러진 갈비뼈 (쇠와 인형 플라스틱이 뒤섞여 있다)
   for (let i = 0; i < 6; i++) {
-    const pivot = new THREE.Group(); pivot.position.set(rand(-0.25, 0.25), rand(1.45, 2.05), rand(0.08, 0.16)); body.add(pivot);
-    const len = rand(0.15, 0.45), r = rand(0.06, 0.09);
-    limb(pivot, V(0, 0, 0), V(0, -len, 0), 0.004, voidMat);
-    const th = add(new THREE.SphereGeometry(r, 10, 8), i % 2 ? plushP : plushY, 0, -len - r, 0, pivot);
-    for (const sx of [-1, 1]) add(new THREE.CylinderGeometry(r * 0.22, r * 0.22, 0.01, 8), voidMat, sx * r * 0.35, r * 0.15, r * 0.95, th).rotation.x = Math.PI / 2;
+    const r = add(new THREE.TorusGeometry(0.25 - Math.abs(i - 2.5) * 0.02, 0.016, 5, 12, Math.PI * rand(0.5, 1)), i % 2 ? metal : doll, 0, 1.55 + i * 0.11, 0.02 + i * 0.03);
+    r.rotation.set(Math.PI / 2 + rand(-0.15, 0.15), rand(-0.6, 0.6), 0);
+  }
+  // 갈비뼈에 들러붙은 썩은 인형 가죽
+  for (const [x, y, z, sx, sy, sz] of [[0.13, 1.85, 0.12, 0.2, 0.26, 0.1], [-0.17, 1.6, 0.06, 0.18, 0.2, 0.12], [-0.25, 2.12, 0.05, 0.14, 0.12, 0.14]]) {
+    const pm = add(new THREE.SphereGeometry(1, 10, 8, 0, Math.PI * rand(1, 1.6)), hide, x, y, z); pm.scale.set(sx, sy, sz); pm.rotation.set(rand(-0.4, 0.4), rand(0, 6), rand(-0.4, 0.4));
+  }
+  // 몸에 파묻힌 죽은 인형 얼굴들
+  const dollFace = (x, y, z, r, ry) => {
+    const f = new THREE.Group(); f.position.set(x, y, z); f.rotation.y = ry; body.add(f);
+    add(new THREE.SphereGeometry(r, 12, 10), doll, 0, 0, 0, f).scale.set(0.9, 1.05, 0.8);
+    for (const sx of [-1, 1]) add(new THREE.SphereGeometry(r * 0.22, 8, 6), voidMat, sx * r * 0.35, r * 0.15, r * 0.7, f);
+    add(new THREE.SphereGeometry(r * 0.18, 8, 6), voidMat, 0, -r * 0.4, r * 0.72, f).scale.set(1, 1.6, 0.5);
+  };
+  dollFace(0.04, 1.98, 0.2, 0.07, 0.2); dollFace(-0.1, 1.5, 0.17, 0.06, -0.3); dollFace(0.2, 1.65, 0.15, 0.05, 0.7);
+  // 갈비뼈 사이로 삐져나온 작은 인형 팔들 (무언가를 붙잡으려는 듯)
+  for (let i = 0; i < 6; i++) {
+    const a = V(rand(-0.18, 0.18), rand(1.5, 2.1), rand(0.05, 0.15)), dir = V(rand(-1, 1), rand(-0.6, 0.6), rand(0.4, 1)).normalize();
+    const b = a.clone().addScaledVector(dir, rand(0.18, 0.3)), c2 = b.clone().add(V(rand(-0.08, 0.08), rand(-0.12, 0.05), rand(0.02, 0.1)));
+    limb(body, a, b, 0.016, doll); limb(body, b, c2, 0.013, doll);
+    for (let f = 0; f < 3; f++) { const tip = c2.clone().add(V(rand(-0.03, 0.03), rand(-0.05, -0.01), rand(0, 0.03))); limb(body, c2, tip, 0.004, doll); }
+  }
+  // 늘어진 전선과 매달린 인형 머리 하나
+  const dangles = [];
+  for (let i = 0; i < 4; i++) {
+    const pivot = new THREE.Group(); pivot.position.set(rand(-0.22, 0.22), rand(1.5, 2.1), rand(0.05, 0.14)); body.add(pivot);
+    const len = rand(0.25, 0.55); limb(pivot, V(0, 0, 0), V(0, -len, 0), 0.006, voidMat);
+    if (i === 0) { const h = add(new THREE.SphereGeometry(0.07, 10, 8), doll, 0, -len - 0.07, 0, pivot); add(new THREE.SphereGeometry(0.016, 6, 4), voidMat, -0.025, -len - 0.06, 0.06, pivot); add(new THREE.SphereGeometry(0.016, 6, 4), voidMat, 0.025, -len - 0.06, 0.06, pivot); h.rotation.z = 2.6; }
     dangles.push(pivot);
   }
 
-  // 다리 (길고 뒤로 꺾인 관절)
+  // 다리: 길고 뒤로 꺾인 쇠 다리, 발톱
   const legs = [];
   for (const sx of [-1, 1]) {
-    const hip = new THREE.Group(); hip.position.set(sx * 0.18, 1.2, 0); body.add(hip);
-    limb(hip, V(0, 0, 0), V(sx * 0.04, -0.55, 0.2), 0.05, metal);
-    limb(hip, V(sx * 0.04, -0.55, 0.2), V(sx * 0.02, -1.12, -0.12), 0.04, metal);
-    add(new THREE.SphereGeometry(0.07, 8, 6), rust, sx * 0.04, -0.55, 0.2, hip);
-    add(new THREE.BoxGeometry(0.14, 0.07, 0.34), rust, sx * 0.02, -1.15, 0.0, hip);
-    const pm = add(new THREE.SphereGeometry(0.11, 8, 6, 0, Math.PI * 1.3), plushP, 0, -0.3, 0.08, hip); pm.scale.set(1, 1.6, 0.9);
+    const hip = new THREE.Group(); hip.position.set(sx * 0.17, 1.3, 0); body.add(hip);
+    const k = V(sx * 0.03, -0.6, 0.25), an = V(0, -1.08, -0.16), toe = V(0, -1.28, 0.1);
+    limb(hip, V(0, 0, 0), k, 0.045, metal); limb(hip, k, an, 0.035, metal); limb(hip, an, toe, 0.03, rust);
+    add(new THREE.SphereGeometry(0.06, 8, 6), rust, ...k.toArray(), hip);
+    for (const tx of [-0.05, 0, 0.05]) { const c = add(new THREE.ConeGeometry(0.014, 0.12, 4), rust, tx, -1.29, 0.18, hip); c.rotation.x = Math.PI / 2; }
     legs.push(hip);
   }
-  // 팔 (바닥에 끌릴 만큼 길다). 오른손은 거대한 갈퀴손
-  const arms = [];
-  for (const sx of [-1, 1]) {
-    const sh = new THREE.Group(); sh.position.set(sx * 0.44, 2.2, 0); body.add(sh);
-    limb(sh, V(0, 0, 0), V(0, -0.78, 0), 0.04, metal);
-    add(new THREE.SphereGeometry(0.06, 8, 6), rust, 0, -0.78, 0, sh);
-    const fore = new THREE.Group(); fore.position.set(0, -0.78, 0); sh.add(fore);
-    limb(fore, V(0, 0, 0), V(0, -0.82, 0), 0.032, metal);
-    const big = sx > 0 ? 1.7 : 1, hand = new THREE.Group(); hand.position.y = -0.84; fore.add(hand);
-    add(new THREE.BoxGeometry(0.12 * big, 0.12 * big, 0.05 * big), rust, 0, -0.04 * big, 0, hand);
-    for (let f = 0; f < 5; f++) {
-      const fx = (f - 2) * 0.03 * big, a = V(fx, -0.08 * big, 0), b = V(fx * 1.6, -0.08 * big - 0.22 * big, 0.07 * big), c = V(fx * 1.9, -0.08 * big - 0.42 * big, 0.17 * big);
-      limb(hand, a, b, 0.012 * big, metal); limb(hand, b, c, 0.008 * big, metal);
-      const tip = add(new THREE.ConeGeometry(0.012 * big, 0.08 * big, 4), rust, c.x, c.y - 0.03 * big, c.z, hand); tip.rotation.x = Math.PI;
-    }
-    sh.rotation.z = sx * 0.12; arms.push({ sh, fore });
-  }
 
-  // 목과 머리: tilt(흔들림) 안에 spin(해↔달 회전)
-  limb(body, V(0, 2.2, 0), V(0, 2.42, 0.06), 0.03, metal);
-  const head = new THREE.Group(); head.position.set(0, 2.45, 0.08); body.add(head);
-  const spin = new THREE.Group(); head.add(spin);
-  const R = 0.36;
-  const sunMat = new THREE.MeshStandardMaterial({ map: bossFaceTex('sun'), roughness: 0.35, metalness: 0.05 });
-  const moonMat = new THREE.MeshStandardMaterial({ map: bossFaceTex('moon'), roughness: 0.35, metalness: 0.05 });
-  add(new THREE.CircleGeometry(R, 40), sunMat, 0, 0, 0.061, spin);
-  add(new THREE.CircleGeometry(R, 40), moonMat, 0, 0, -0.061, spin).rotation.y = Math.PI;
-  const rim = add(new THREE.CylinderGeometry(R, R, 0.12, 40, 1, true), new THREE.MeshStandardMaterial({ color: 0x6a5a40, metalness: 0.5, roughness: 0.6 }), 0, 0, 0, spin); rim.rotation.x = Math.PI / 2;
-  // 테두리의 부러진 쇠 가시
-  const spikeMat = new THREE.MeshStandardMaterial({ color: 0x8c7232, metalness: 0.7, roughness: 0.5 });
-  for (let i = 0; i < 18; i++) {
-    const a = (i / 18) * Math.PI * 2, len = (i % 2 ? 0.1 : 0.2) * (Math.random() < 0.25 ? 0.4 : 1);
-    const sp = add(new THREE.ConeGeometry(0.035, len, 4), i % 5 === 0 ? rust : spikeMat, Math.cos(a) * (R + len / 2), Math.sin(a) * (R + len / 2), 0, spin);
-    sp.rotation.z = a - Math.PI / 2;
+  // 왼팔: 뼈처럼 앙상한 팔, 바늘 같은 다섯 손가락
+  const shL = new THREE.Group(); shL.position.set(-0.42, 2.18, 0.15); body.add(shL);
+  limb(shL, V(0, 0, 0), V(0, -0.85, 0), 0.03, doll); add(new THREE.SphereGeometry(0.045, 8, 6), rust, 0, -0.85, 0, shL);
+  const foreL = new THREE.Group(); foreL.position.set(0, -0.85, 0); shL.add(foreL);
+  limb(foreL, V(0, 0, 0), V(0, -0.85, 0), 0.025, doll);
+  for (let f = 0; f < 5; f++) limb(foreL, V((f - 2) * 0.015, -0.85, 0), V((f - 2) * 0.05, -1.22, 0.06 + Math.abs(f - 2) * -0.02), 0.006, metal);
+  shL.rotation.z = -0.15;
+
+  // 오른팔: 바닥에 끌리는 기계 집게팔. 망원경처럼 늘어난다
+  const shR = new THREE.Group(); shR.position.set(0.42, 2.18, 0.15); body.add(shR);
+  limb(shR, V(0, 0, 0), V(0, -0.95, 0), 0.045, metal); limb(shR, V(0.06, -0.1, 0), V(0.05, -0.8, 0.02), 0.015, rust); // 피스톤
+  add(new THREE.SphereGeometry(0.07, 10, 8), rust, 0, -0.95, 0, shR);
+  const foreR = new THREE.Group(); foreR.position.set(0, -0.95, 0); shR.add(foreR);
+  limb(foreR, V(0, 0, 0), V(0, -0.45, 0), 0.055, rust);                        // 바깥 관
+  const ext = new THREE.Group(); foreR.add(ext); limb(ext, V(0, -0.1, 0), V(0, -1.0, 0), 0.034, metal); // 늘어나는 안쪽 관
+  const claw = new THREE.Group(); claw.position.y = -1.02; foreR.add(claw);
+  add(new THREE.SphereGeometry(0.065, 10, 8), rust, 0, 0, 0, claw);
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2, cx = Math.cos(a), cz = Math.sin(a);
+    const p1 = V(cx * 0.05, -0.02, cz * 0.05), p2 = V(cx * 0.16, -0.18, cz * 0.16), p3 = V(cx * 0.17, -0.38, cz * 0.17), p4 = V(cx * 0.05, -0.5, cz * 0.05);
+    limb(claw, p1, p2, 0.016, metal); limb(claw, p2, p3, 0.013, metal); limb(claw, p3, p4, 0.01, rust);
+    add(new THREE.SphereGeometry(0.022, 6, 5), rust, ...p2.toArray(), claw);
   }
-  // 어둠 속에서 빛나는 동공 (해 쪽 두 개, 달 쪽 한 개)
-  const glowMat = new THREE.MeshBasicMaterial({ color: 0xff2a1a, fog: false });
-  const facePt = (u, v, back) => V((back ? -1 : 1) * (u - 256) / 256 * R, (256 - v) / 256 * R, back ? -0.065 : 0.065);
-  for (const [u, v, back] of [[169, 212, 0], [337, 193, 0], [335, 218, 1]]) add(new THREE.SphereGeometry(0.011, 6, 6), glowMat, ...facePt(u, v, back).toArray(), spin);
-  // 잡힐 때 벌어지는 입 (평소엔 숨겨져 있다)
-  const mkMouth = back => {
-    const m = add(new THREE.SphereGeometry(0.06, 12, 8), voidMat, ...facePt(256, back ? 365 : 360, back).toArray(), spin);
-    for (let i = 0; i < 14; i++) {
-      const a = (i / 14) * Math.PI * 2, t = new THREE.Mesh(new THREE.ConeGeometry(0.008, 0.03, 4), new THREE.MeshStandardMaterial({ color: 0xe0d4b8 }));
-      t.position.set(Math.cos(a) * 0.05, Math.sin(a) * 0.05, 0.075); t.rotation.z = a + Math.PI / 2; m.add(t);
-    }
-    if (back) m.rotation.y = Math.PI;
-    return m;
-  };
-  const mouthSun = mkMouth(false), mouthMoon = mkMouth(true), mouthBase = [0.0001, 0.0001, 0.0001];
-  const ud = g.userData = { body, head, spin, arms, legs, dangles, mouth: mouthSun, mouthBase, twitch: 0, faceY: 2.45, faceZ: 0.12, screamMouth: [3.0, 2.3, 0.6] };
+  shR.rotation.z = 0.1;
+  const arms = [{ sh: shL, fore: foreL }, { sh: shR, fore: foreR }];
+
+  // 앞으로 길게 뻗은 목, 그 끝의 도자기 해골
+  limb(body, V(0, 2.24, 0.32), V(0, 2.3, 0.52), 0.03, metal);
+  add(new THREE.SphereGeometry(0.035, 6, 5), rust, 0, 2.27, 0.42);
+  const head = new THREE.Group(); head.position.set(0, 2.32, 0.6); body.add(head);
+  const spin = new THREE.Group(); head.add(spin);
+  add(new THREE.SphereGeometry(0.2, 22, 16), porc, 0, 0.02, 0, spin).scale.set(0.85, 1.15, 1.05);
+  // 앞: 깊은 눈구멍과 바늘 같은 빛
+  const pin = new THREE.MeshBasicMaterial({ color: 0xfff2e0, fog: false });
+  for (const sx of [-1, 1]) {
+    add(new THREE.SphereGeometry(0.056, 10, 8), voidMat, sx * 0.068, 0.05, 0.16, spin).scale.set(1, 1.25, 0.6);
+    add(new THREE.SphereGeometry(0.0075, 6, 6), pin, sx * 0.064, 0.045, 0.178, spin);
+  }
+  add(new THREE.ConeGeometry(0.022, 0.05, 3), voidMat, 0, -0.03, 0.2, spin).rotation.x = Math.PI;        // 콧구멍
+  add(new THREE.SphereGeometry(0.05, 8, 6), voidMat, 0.12, -0.05, 0.12, spin).scale.set(1, 0.7, 0.5);  // 깨져 나간 뺨
+  for (let i = 0; i < 11; i++) {                                                                         // 윗니
+    const x = (i - 5) * 0.014, t = add(new THREE.ConeGeometry(0.0075, rand(0.03, 0.06), 4), toothMat, x, -0.11, 0.17 - Math.abs(x) * 0.6, spin); t.rotation.x = Math.PI;
+  }
+  const throat = add(new THREE.SphereGeometry(0.06, 10, 8), voidMat, 0, -0.14, 0.12, spin);
+  // 덜렁거리는 아래턱
+  const jaw = new THREE.Group(); jaw.position.set(0, -0.11, 0.04); spin.add(jaw);
+  add(new THREE.SphereGeometry(0.14, 14, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), porc, 0, 0.0, 0.03, jaw).scale.set(0.75, 0.8, 1.0);
+  for (let i = 0; i < 9; i++) { const x = (i - 4) * 0.016; add(new THREE.ConeGeometry(0.007, rand(0.03, 0.05), 4), toothMat, x, 0.012, 0.15 - Math.abs(x) * 0.7, jaw); }
+  // 뒤: 실로 꿰맨 눈들과 세로로 찢어진 입 — '듣는 얼굴'
+  const stitch = new THREE.MeshBasicMaterial({ color: 0x0c0806 });
+  for (const [x, y] of [[-0.075, 0.08], [0.075, 0.08], [-0.05, 0.16], [0.05, 0.16]]) {
+    add(new THREE.BoxGeometry(0.07, 0.006, 0.006), stitch, x, y, -0.205, spin);
+    for (let k = 0; k < 4; k++) add(new THREE.BoxGeometry(0.004, 0.03, 0.004), stitch, x - 0.027 + k * 0.018, y, -0.207, spin).rotation.z = 0.4;
+  }
+  const slit = add(new THREE.SphereGeometry(0.07, 10, 10), voidMat, 0, -0.04, -0.195, spin); slit.scale.set(0.3, 2.0, 0.35);
+  for (let i = 0; i < 9; i++) for (const sx of [-1, 1]) {
+    const t = add(new THREE.ConeGeometry(0.006, 0.03, 4), toothMat, sx * 0.024, -0.15 + i * 0.027, -0.215, spin); t.rotation.z = sx * Math.PI / 2;
+  }
+  add(new THREE.SphereGeometry(0.01, 6, 6), new THREE.MeshBasicMaterial({ color: 0xff1a0a, fog: false }), 0, -0.04, -0.205, spin); // 입 속의 붉은 빛
+
+  const ud = g.userData = { body, head, spin, jaw, arms, legs, dangles, claw, ext, mouth: throat, mouthBase: [1, 1, 1], twitch: 0, faceY: 2.24, faceZ: 0.75, screamMouth: [2.4, 3.2, 1] };
+  ud.reach = k => { ext.scale.y = k; claw.position.y = -1.02 * k; };
   ud.setMode = mode => {
-    ud.mouth = mode === 'moon' ? mouthMoon : mouthSun;
-    mouthSun.scale.set(...mouthBase); mouthMoon.scale.set(...mouthBase);
-    spin.rotation.y = mode === 'moon' ? Math.PI : 0;
+    ud.mouth = mode === 'moon' ? slit : throat; ud.mouthBase = mode === 'moon' ? [0.3, 2.0, 0.35] : [1, 1, 1];
+    throat.scale.set(1, 1, 1); slit.scale.set(0.3, 2.0, 0.35); spin.rotation.y = mode === 'moon' ? Math.PI : 0;
+    ud.screamMouth = mode === 'moon' ? [1.2, 3.6, 0.6] : [2.4, 3.2, 1];
   };
-  ud.reset = () => { ud.setMode('sun'); head.rotation.set(0, 0, 0); body.rotation.set(0, 0, 0); body.position.y = 0; arms.forEach(a => { a.sh.rotation.x = 0; a.fore.rotation.x = 0; }); legs.forEach(l => l.rotation.x = 0); };
+  ud.onDeath = () => { ud.reach(1.7); jaw.rotation.x = 1.1; arms[1].sh.rotation.x = -1.6; arms[0].sh.rotation.x = -2.0; };
+  ud.reset = () => { ud.setMode('sun'); ud.reach(1); jaw.rotation.x = 0.35; head.rotation.set(0, 0, 0); body.rotation.set(0, 0, 0); body.position.y = 0; arms.forEach(a => { a.sh.rotation.x = 0; a.fore.rotation.x = 0; }); legs.forEach(l => l.rotation.x = 0); };
   ud.reset();
   return g;
 }
@@ -1103,19 +1095,20 @@ const MTYPES = {
   }
 };
 MTYPES.boss = {
-  // 해님달님 선생님: 손전등을 켜면 '해님' — 빛을 보고 쫓아온다. 끄면 '달님' — 눈을 감고 소리로, 네 발로 더 빨리 쫓아온다
-  build: makeBoss, kind: 'boss', noProxWake: true, killR: 1.15,
-  sun: { see: 24, hear: { run: 12, walk: 5, sneak: 1.5, still: 0 }, speed: { wander: 2.3, search: 2.9, chase: 3.45 } },
+  // 기워진 것: 손전등을 켜면 해골 얼굴로 빛을 '본다'. 끄면 머리가 돌아가 꿰맨 얼굴로 '듣고', 네 발로 더 빨리 긴다
+  build: makeBoss, kind: 'boss', noProxWake: true, killR: 0.95, grabR: 2.7,
+  sun: { see: 24, hear: { run: 12, walk: 5, sneak: 1.5, still: 0 }, speed: { wander: 2.3, search: 2.9, chase: 3.5 } },
   moon: { see: 0, hear: { run: 22, walk: 9, sneak: 2.3, still: 0 }, speed: { wander: 2.6, search: 3.4, chase: 4.9 } },
-  voice: { f: 40, lp: 260, bp: 650, q: 3, growl: 0.35, vib: 5 }
+  voice: { f: 36, lp: 220, bp: 520, q: 3, growl: 0.5, vib: 4 }
 };
-const NAMES = { stalker: '머리카락의 여자', listener: '눈 없는 것', watcher: '하얀 인형', crawler: '천장을 기는 것', mass: '살덩어리', shade: '검은 그림자', boss: '해님달님 선생님' };
-// 반짝반짝 작은 별 (망가진 오르골)
-const LULLABY = [523, 523, 784, 784, 880, 880, 784, 0, 698, 698, 659, 659, 587, 587, 523, 0].map(f => f * 2);
+const NAMES = { stalker: '머리카락의 여자', listener: '눈 없는 것', watcher: '하얀 인형', crawler: '천장을 기는 것', mass: '살덩어리', shade: '검은 그림자', boss: '기워진 것' };
+// 늘어지고 음이 어긋난 단조 오르골 (오리지널 선율)
+const DIRGE = [440, 523, 494, 330, 0, 440, 523, 587, 494, 0, 392, 349, 330, 311, 330, 0, 0].map(f => f * 2);
 const BOSS_LINES = {
-  sun: ['"어디 숨었니~? 선생님 눈엔 다 보여요~"', '"불 켜고 다니면 반칙이에요~"', '"착한 아이는 도망 안 가요~"', '"놀이 시간은 아직 안 끝났어요~"'],
-  moon: ['"쉿... 이제 잘 시간이야..."', '"불 껐구나... 그럼 숨소리로 찾을게"', '"자장, 자장... 착하지... 움직이지 마..."', '"선생님은 어둠 속에서 더 빨라요"']
+  sun: ['"...찾았다."', '"...나도 여기 버려졌어."', '"...가지 마. 너도 여기 남아."', '"...빛이 보여. 네가 보여."'],
+  moon: ['"...숨소리가 들려."', '"...어둠은 내 거야."', '"...심장 소리가 너무 커."', '"...움직여 봐. 한 번만."']
 };
+const BOSS_RED = '#c8322a';
 // 등장 순서: 시간이 지나거나 퓨즈를 모을수록 하나씩 깨어난다
 const ROSTER = [
   { type: 'stalker', wake: { t: 9, f: 0 }, msg: '...어딘가에서 무언가 깨어났다' },
@@ -1125,7 +1118,7 @@ const ROSTER = [
   { type: 'crawler', wake: { t: 0, f: 3 }, msg: '머리 위 어딘가에서 수많은 다리가 사각거린다' },
   { type: 'mass', wake: { t: 0, f: 4 }, msg: '축축하고 무거운 것이 바닥을 끌며 깨어났다. 그것은 당신이 어디 있는지 안다' },
   { type: 'stalker', wake: { t: 0, f: 4 }, delay: 14, msg: '또 하나가 깨어났다. 이번엔 더 가까이에서', scale: 1.12 },
-  { type: 'boss', wake: { t: 0, f: 5 }, delay: 3.5, msg: '바닥 아래에서... 망가진 오르골 소리가 올라온다' }
+  { type: 'boss', wake: { t: 0, f: 5 }, delay: 3.5, msg: '바닥 아래에서... 쇠가 긁히는 소리가 올라온다' }
 ];
 const monsterMeshes = ROSTER.map(r => {
   const T = MTYPES[r.type], m = T.build ? T.build() : makeMonster({ ...T.model, ...(r.scale ? { scale: r.scale } : {}) });
@@ -1145,7 +1138,7 @@ const S = { // 게임 상태
   state: 'menu', time: 0, fuses: 0, doorOpen: false, doorT: 0,
   player: { pos: new THREE.Vector3(), yaw: 0, pitch: 0, stamina: 100, exhausted: false, battery: 100, flash: true, bob: 0, moving: false, sprinting: false, sneaking: false, crouch: 0 },
   monsters: [], kids: [], killer: null, wakeT: 0, heartT: 0, breathT: 0, whisperT: 25, bangT: 14, deathT: 0, introShown: false,
-  fear: 0, glitch: 0, blackout: 0, followT: 40, followN: 0, followStepT: 0, followD: 5
+  fear: 0, glitch: 0, blackout: 0, followT: 40, followN: 0, followStepT: 0, followD: 5, bossDist: 99
 };
 
 function disposeWorld() {
@@ -1263,7 +1256,7 @@ function buildWorld() {
       ud.arms.forEach(a => { a.sh.rotation.x = 0; a.fore.rotation.x = 0; }); ud.legs.forEach(l => { l.rotation.x = 0; }); ud.head.rotation.set(0.6, 0, 0.3);
     }
     return { idx, cfg, kind: cfg.kind || 'hunter', type: r.type, wake: r.wake, msg: r.msg, mesh, pos: new THREE.Vector3(mp.x, 0, mp.z), path: [], state: 'dormant', dormant: idx === 0 ? 0 : (r.delay ?? 2.5),
-      chaseT: 0, repath: 0, stepT: 0, lastKnown: null, searchT: 0, dir: new THREE.Vector3(0, 0, 1), anim: 0, jerkT: 0, clickT: rand(1, 3), watched: false, poseT: 0, mode: 'sun', spinT: 0, riseT: 0, noteI: 0, noteT: 0, lineT: 8, hitT: 0, goneT: 0, fade: 1, whisperT: rand(4, 8) };
+      chaseT: 0, repath: 0, stepT: 0, lastKnown: null, searchT: 0, dir: new THREE.Vector3(0, 0, 1), anim: 0, jerkT: 0, clickT: rand(1, 3), watched: false, poseT: 0, mode: 'sun', spinT: 0, riseT: 0, noteI: 0, noteT: 0, lineT: 8, breathT: 0, grabT: 0, grabCD: 0, stareT: 0, hitT: 0, goneT: 0, fade: 1, whisperT: rand(4, 8) };
   });
   S.killer = null;
 
@@ -1280,7 +1273,7 @@ function buildWorld() {
   });
 
   Object.assign(S, { time: 0, fuses: 0, doorOpen: false, doorT: 0, heartT: 0, breathT: 0, whisperT: rand(20, 35), bangT: 9.5, deathT: 0, introShown: false, wakeT: 0,
-    fear: 0, glitch: 0, blackout: 0, followT: rand(30, 45), followN: 0, followStepT: 0, followD: 5 });
+    fear: 0, glitch: 0, blackout: 0, followT: rand(30, 45), followN: 0, followStepT: 0, followD: 5, bossDist: 99 });
   Object.assign(G, { active: null, t: rand(28, 40), behindDone: false }); ghostMesh.visible = false;
   scene.fog.density = FOG_DENSITY;
   updateHUD();
@@ -1377,8 +1370,8 @@ if (isTouch) {
    게임 흐름
    ========================================================= */
 let msgTimer = null;
-function showMsg(text, dur = 3.2) {
-  const m = $('msg'); m.textContent = text; m.style.opacity = 1;
+function showMsg(text, dur = 3.2, color = '') {
+  const m = $('msg'); m.textContent = text; m.style.opacity = 1; m.style.color = color;
   clearTimeout(msgTimer); msgTimer = setTimeout(() => { m.style.opacity = 0; }, dur * 1000);
 }
 function pl_flashOn() { S.player.flash = true; if (isTouch) $('tFlash').classList.add('on'); }
@@ -1449,7 +1442,7 @@ function endGame(win) {
   const t = $('endTitle');
   if (win) {
     t.textContent = '탈출했다'; t.style.color = '#d8d2c4';
-    $('endStats').innerHTML = `문 너머는 눈부시게 하얀 빛이었다.<br>등 뒤에서 오르골 소리가 뚝, 멈췄다.<br>뒤를 돌아보자, 방금 나온 문이 사라지고 없었다.<br>...정말 나온 걸까?<br><br>탈출 시간 ${mm}:${ss}`;
+    $('endStats').innerHTML = `문 너머는 눈부시게 하얀 빛이었다.<br>등 뒤에서, 쇠 손가락이 문틀을 긁는 소리가 끝없이 이어졌다.<br>뒤를 돌아보자, 방금 나온 문이 사라지고 없었다.<br>...정말 나온 걸까?<br><br>탈출 시간 ${mm}:${ss}`;
   } else {
     t.textContent = '잡혔다'; t.style.color = '#b31212';
     const who = S.killer ? NAMES[S.killer.type] : '그것';
@@ -1520,6 +1513,7 @@ function updatePlayer(dt) {
   if (S.blackout > 0) { S.blackout -= dt; fi = 0; flashlight.intensity = 0; }
   if (pl.flash && pl.battery < 20 && Math.random() < (20 - pl.battery) / 60) fi *= Math.random() * 0.4;
   if (pl.flash && S.monsters.some(m => m.state === 'chase') && Math.random() < 0.04) fi *= 0.2; // 쫓기고 있으면 손전등이 떨린다
+  if (pl.flash && S.bossDist < 12 && Math.random() < (12 - S.bossDist) / 28) fi *= Math.random() * 0.25; // 그것이 가까우면 손전등이 미쳐 날뛴다
   flashlight.intensity += (fi - flashlight.intensity) * Math.min(1, dt * 25);
   flashlight.distance = 14 + pl.battery * 0.12;
 
@@ -1802,80 +1796,123 @@ function updateKids(dt) {
   }
 }
 
-// 해님달님 선생님: 출구로 가는 길 한가운데, 바닥을 뚫고 올라온다
+// 기워진 것: 출구로 가는 길 한가운데, 바닥을 뚫고 기어 올라온다
 function placeBoss(m) {
   const pt = toTile(S.player.pos), path = findPath(pt.x, pt.z, exitTile.x - 1, exitTile.z);
-  let c = path.length > 12 ? path[clamp(Math.floor(path.length * 0.55), 8, path.length - 3)] : path[path.length - 1] || { x: exitTile.x - 1, z: exitTile.z };
+  const c = path.length > 12 ? path[clamp(Math.floor(path.length * 0.55), 8, path.length - 3)] : path[path.length - 1] || { x: exitTile.x - 1, z: exitTile.z };
   const p = tileCenter(c.x, c.z); m.pos.set(p.x, 0, p.z);
   m.state = 'rising'; m.riseT = 0; m.mode = 'sun'; m.speeds = m.cfg.sun.speed; m.mesh.userData.reset();
-  m.mesh.position.set(p.x, -3.2, p.z); m.mesh.visible = true; m.noteT = 0; m.noteI = 0;
+  m.mesh.position.set(p.x, -3.4, p.z); m.mesh.visible = true; m.noteT = 1; m.noteI = 0; m.breathT = 0; m.grabCD = 0; m.stareT = 0;
+  lamps.forEach(L => { L.base = 1.2; });                                     // 비상등마저 꺼져 간다
 }
-function bossSay(m, txt, dur = 3.2) { showMsg('해님달님 선생님: ' + txt, dur); sfx.giggle(m.pos.clone().setY(2.4)); }
+function bossSay(m, txt, dur = 3) { showMsg(txt, dur, BOSS_RED); sfx.whisper(m.pos.clone().setY(2.2)); }
 function updateBoss(m, dt, dist, pp, pt) {
-  const pl = S.player, ud = m.mesh.userData, cfg = m.cfg, head = m.pos.clone().setY(2.4);
-  // 오르골: 해님일 땐 노래하고, 달님일 땐 한 음씩 느리게 끊긴다
+  const pl = S.player, ud = m.mesh.userData, cfg = m.cfg, head = m.pos.clone().setY(2.2), moon = m.mode === 'moon';
+  S.bossDist = m.state === 'rising' ? 99 : dist;
+  // 멀리서 들리는 늘어진 오르골, 가까이선 젖은 쇳덩이 숨소리
   m.noteT -= dt;
-  if (m.noteT <= 0) {
-    const f = LULLABY[m.noteI++ % LULLABY.length];
-    if (f) sfx.musicNote(head, m.mode === 'moon' ? f / 2 : f);
-    m.noteT = m.mode === 'moon' ? rand(0.9, 1.4) : 0.42 * rand(0.95, 1.25);
-  }
-  setVoice(m, head, m.state === 'chase' ? 0.6 : 0.3, m.mode === 'moon' ? 1.8 : 0.6);
+  if (m.noteT <= 0) { const f = DIRGE[m.noteI++ % DIRGE.length]; if (f) sfx.musicNote(head, moon ? f / 2 : f * 0.94); m.noteT = rand(0.9, 1.6); }
+  m.breathT -= dt;
+  if (m.breathT <= 0) { sfx.bigBreath(head, m.state === 'chase'); m.breathT = m.state === 'chase' ? rand(0.9, 1.3) : rand(2.4, 3.4); }
+  setVoice(m, head, m.state === 'chase' || m.state === 'grab' ? 0.75 : 0.35, moon ? 1.8 : 0.5);
+  // 아래턱: 쫓을 땐 덜그럭덜그럭 떨린다
+  ud.jaw.rotation.x = m.state === 'chase' || m.state === 'grab' ? 0.45 + Math.abs(Math.sin(S.time * 23)) * 0.35 : 0.3 + Math.sin(S.time * 1.7) * 0.06;
+  ud.claw.rotation.y += dt * (m.state === 'chase' ? 6 : 0.8);
+  ud.dangles.forEach((d, i) => { d.rotation.x = Math.sin(S.time * 2.6 + i) * 0.35 + (moon ? -0.9 : 0); d.rotation.z = Math.cos(S.time * 2 + i) * 0.25; });
+
   if (m.state === 'rising') {
-    m.riseT += dt; const k = smooth(Math.min(1, m.riseT / 3));
-    m.mesh.position.set(m.pos.x, -3.2 * (1 - k), m.pos.z);
+    m.riseT += dt; const k = smooth(Math.min(1, m.riseT / 4.2));
+    m.mesh.position.set(m.pos.x, -3.4 * (1 - k), m.pos.z);
     m.mesh.rotation.y = Math.atan2(pp.x - m.pos.x, pp.z - m.pos.z);
-    ud.arms.forEach((a, i) => { a.sh.rotation.x = -2.6 + Math.sin(S.time * 7 + i) * 0.15; a.fore.rotation.x = -0.3; });
-    ud.head.rotation.set(0, 0, Math.sin(S.time * 2) * 0.4);
-    S.glitch = Math.max(S.glitch, 0.15);
-    if (m.riseT >= 3) { m.state = 'chase'; m.chaseT = 5; m.lastKnown = pt; m.repath = 0; sfx.stinger(); bossSay(m, '"다들 어디 가요? 아직 놀이 시간 안 끝났어요~"', 4); m.lineT = rand(9, 13); }
+    ud.body.rotation.x = 0.5 * (1 - k) + 0.2;
+    ud.arms.forEach((a, i) => { a.sh.rotation.x = -2.8 + Math.sin(S.time * 9 + i * 2) * 0.2; a.fore.rotation.x = -0.4; }); // 바닥을 할퀴며 올라온다
+    ud.head.rotation.set(0, 0, Math.sin(S.time * 13) * 0.25);
+    m.stepT -= dt; if (m.stepT <= 0) { sfx.scrape(m.pos.clone().setY(0.1)); m.stepT = rand(0.2, 0.45); }
+    S.glitch = Math.max(S.glitch, 0.2);
+    if (m.riseT >= 4.2) { m.state = 'stare'; m.stareT = 2.2; sfx.hit(); bossSay(m, '"...가지 마. 너도 여기 남아."', 3.5); m.lineT = rand(14, 20); }
     return;
   }
-  // 손전등에 따라 얼굴이 바뀐다
-  const want = pl.flash && flashlight.intensity > 4 ? 'sun' : 'moon';
-  if (m.spinT <= 0 && want !== m.mode) { m.spinT = 0.75; m.nextMode = want; sfx.ratchet(head); S.glitch = Math.max(S.glitch, 0.4); }
+  // 손전등에 따라 머리가 돌아간다: 해골 얼굴(본다) ↔ 꿰맨 얼굴(듣는다)
+  const want = pl.flash ? 'sun' : 'moon';                    // 손전등 스위치 기준 (깜빡임엔 반응하지 않는다)
+  if (m.spinT <= 0 && want !== m.mode && m.state !== 'grab') { m.spinT = 0.8; m.nextMode = want; sfx.ratchet(head); S.glitch = Math.max(S.glitch, 0.5); }
   if (m.spinT > 0) {
     m.spinT -= dt;
-    ud.spin.rotation.y += dt * Math.PI / 0.75 * (m.nextMode === 'moon' ? 1 : -1);
-    ud.head.rotation.z = rand(-0.2, 0.2);
+    ud.spin.rotation.y += dt * Math.PI / 0.8 * (m.nextMode === 'moon' ? 1 : -1) * (1 + Math.sin(S.time * 40) * 0.6); // 덜컥거리며 돈다
+    ud.head.rotation.z = rand(-0.3, 0.3);
     if (m.spinT <= 0) {
       m.mode = m.nextMode; ud.setMode(m.mode); m.speeds = cfg[m.mode].speed;
-      bossSay(m, BOSS_LINES[m.mode][(Math.random() * BOSS_LINES[m.mode].length) | 0]); m.lineT = rand(10, 15);
+      bossSay(m, BOSS_LINES[m.mode][(Math.random() * BOSS_LINES[m.mode].length) | 0]); m.lineT = rand(14, 20);
     }
     m.mesh.position.copy(m.pos);
     if (dist < cfg.killR) triggerDeath(m);
     return;
   }
-  const M = cfg[m.mode], los = hasLOS(m.pos, pp);
+  const los = hasLOS(m.pos, pp);
+  const faceP = () => { m.mesh.position.copy(m.pos); m.mesh.rotation.y = Math.atan2(pp.x - m.pos.x, pp.z - m.pos.z); };
+
+  // 집게팔 뻗기: 짧게 움츠렸다가, 쇳소리와 함께 튀어나온다
+  if (m.state === 'grab') {
+    m.grabT -= dt; faceP();
+    const k = clamp(1 - m.grabT / 0.5, 0, 1);
+    ud.arms[1].sh.rotation.x = -0.6 - k * 1.0; ud.arms[1].fore.rotation.x = -0.2 * (1 - k);
+    ud.reach(1 + (k < 0.7 ? -0.2 * k : (k - 0.7) / 0.3 * 1.0));
+    ud.body.rotation.x = 0.35 + k * 0.2;
+    if (m.grabT <= 0) {
+      if (dist < cfg.grabR + 0.4 && los) { triggerDeath(m); return; }
+      sfx.clank(m.pos.clone().setY(0.4), 1.3); S.glitch = 0.6;        // 빗나갔다. 바로 옆 바닥을 내리찍는다
+      m.state = 'chase'; m.chaseT = 4; m.lastKnown = pt; m.repath = 0; m.grabCD = 1.4; ud.reach(1);
+    }
+    return;
+  }
+  m.grabCD -= dt;
+  // 처음 발견하면, 잠시 멈춰서 고개를 꺾으며 이쪽을 '본다'. 그 다음 달려온다
+  if (m.state === 'stare') {
+    m.stareT -= dt; faceP();
+    ud.head.rotation.z = Math.min(1.3, ud.head.rotation.z + dt * 0.9);
+    ud.body.rotation.x += (0.25 - ud.body.rotation.x) * Math.min(1, dt * 4);
+    if (m.stareT <= 0 || dist < 4) {
+      m.state = 'chase'; m.chaseT = 6; m.lastKnown = pt; m.repath = 0;
+      sfx.screech(head); sfx.stinger(); S.glitch = 1; ud.head.rotation.z = 0;
+    }
+    return;
+  }
+  const M = cfg[m.mode];
   const sees = M.see > 0 && los && dist < M.see && !(pl.sneaking && !pl.flash);
   const H = M.hear, hearR = pl.sprinting ? H.run : !pl.moving ? H.still : pl.sneaking ? H.sneak : H.walk;
+  if (sees && m.state !== 'chase' && dist > 6) {
+    m.state = 'stare'; m.stareT = 1.5; m.path = []; sfx.hit(); S.glitch = 0.8; bossSay(m, BOSS_LINES.sun[0], 2.4); return;
+  }
   const { moved, speed } = navigate(m, dt, sees || dist < hearR, sees ? 6 : 3.5, pp, pt, dist, los);
+  if (m.state === 'chase' && dist < cfg.grabR && m.grabCD <= 0 && los) { m.state = 'grab'; m.grabT = 0.5; sfx.screech(head); return; }
   if (moved) {
-    m.anim += dt * speed * (m.mode === 'moon' ? 3.2 : 2.2);
+    m.anim += dt * speed * (moon ? 3.2 : 2.0);
     m.stepT -= dt;
-    if (m.stepT <= 0) { sfx.clank(m.pos.clone().setY(0.2), m.state === 'chase' ? 1 : 0.7); m.stepT = m.mode === 'moon' ? 0.2 : 0.45; }
+    if (m.stepT <= 0) {
+      sfx.clank(m.pos.clone().setY(0.2), m.state === 'chase' ? 1 : 0.6);
+      if (Math.random() < 0.6) sfx.scrape(m.pos.clone().setY(0.05));     // 집게손이 바닥을 긁는다
+      m.stepT = moon ? 0.2 : 0.5;
+    }
   }
   if (dist < cfg.killR) { triggerDeath(m); return; }
   m.lineT -= dt;
-  if (m.lineT <= 0 && dist < 22) { bossSay(m, BOSS_LINES[m.mode][(Math.random() * BOSS_LINES[m.mode].length) | 0]); m.lineT = rand(11, 17); }
+  if (m.lineT <= 0 && dist < 20) { bossSay(m, BOSS_LINES[m.mode][(Math.random() * BOSS_LINES[m.mode].length) | 0]); m.lineT = rand(16, 24); }
 
-  // 모양: 해님은 꼿꼿이 성큼성큼, 달님은 네 발로 바닥을 긴다
+  // 모양: 낮게 웅크린 채 성큼성큼 / 어둠 속에선 네 발로 기어 온다. 가까울수록 뚝뚝 끊겨 움직인다
   m.jerkT -= dt;
-  if (m.state !== 'chase' || dist > 10 || m.jerkT <= 0) { m.mesh.position.copy(m.pos); m.jerkT = rand(0.04, 0.12); }
+  if (m.state !== 'chase' || dist > 10 || m.jerkT <= 0) { m.mesh.position.copy(m.pos); m.jerkT = rand(0.04, 0.14); }
   const faceDir = (m.state === 'chase' && dist < 9) ? pp.clone().sub(m.pos).setY(0).normalize() : m.dir;
   m.mesh.rotation.y = Math.atan2(faceDir.x, faceDir.z);
-  const sw = Math.sin(m.anim), moon = m.mode === 'moon';
+  const sw = Math.sin(m.anim);
   ud.legs[0].rotation.x = sw * 0.6; ud.legs[1].rotation.x = -sw * 0.6;
-  ud.body.rotation.x += ((moon ? 0.95 : 0.15) - ud.body.rotation.x) * Math.min(1, dt * 5);
-  ud.body.position.y = moon ? -0.35 : Math.abs(Math.cos(m.anim)) * 0.06;
-  ud.arms[0].sh.rotation.x = (moon ? -1.3 : -0.15) - sw * (moon ? 0.7 : 0.35);
-  ud.arms[1].sh.rotation.x = (moon ? -1.3 : -0.15) + sw * (moon ? 0.7 : 0.35);
-  ud.arms.forEach(a => { a.fore.rotation.x = moon ? -0.2 : -0.35; });
-  ud.dangles.forEach((d, i) => { d.rotation.x = Math.sin(S.time * 3 + i) * 0.4 + (moon ? -0.9 : 0); d.rotation.z = Math.cos(S.time * 2.3 + i) * 0.3; });
+  ud.body.rotation.x += ((moon ? 1.0 : 0.35) - ud.body.rotation.x) * Math.min(1, dt * 5);
+  ud.body.position.y = moon ? -0.4 : Math.abs(Math.cos(m.anim)) * 0.05;
+  ud.arms[0].sh.rotation.x = (moon ? -1.2 : -0.2) - sw * (moon ? 0.7 : 0.3);
+  ud.arms[1].sh.rotation.x = (moon ? -1.1 : 0.15) + sw * (moon ? 0.7 : 0.12);      // 집게팔은 질질 끌린다
+  ud.arms[0].fore.rotation.x = moon ? -0.3 : -0.5; ud.arms[1].fore.rotation.x = moon ? -0.2 : 0.1;
   ud.twitch -= dt;
   if (ud.twitch <= 0) {
-    ud.head.rotation.set(moon ? -0.8 : rand(-0.2, 0.3), rand(-0.3, 0.3), moon ? rand(-1.6, 1.6) : rand(-0.6, 0.6));
-    ud.twitch = rand(0.06, m.state === 'chase' ? 0.3 : 1.2);
+    ud.head.rotation.set(moon ? -0.9 : rand(-0.3, 0.2), rand(-0.4, 0.4), rand(-1.4, 1.4)); // 목이 비정상적으로 꺾인다
+    ud.twitch = rand(0.05, m.state === 'chase' ? 0.22 : 0.9);
   }
 }
 
@@ -1976,6 +2013,7 @@ function triggerDeath(m) {
   ud.mouth.scale.set(...(ud.screamMouth || [1.0, 3.2, 0.5])); setPlayingUI(false); pl.crouch = 0;
   if (ud.arms) ud.arms.forEach(a => { a.sh.rotation.x = -2.2; a.fore.rotation.x = -0.4; });
   if (ud.setOpacity) ud.setOpacity(1);
+  if (ud.onDeath) ud.onDeath();
   S.blackout = 0; flashlight.intensity = 30; scene.fog.density = 0.02;
   $('danger').style.opacity = 1;
   $('flash').style.transition = 'none'; $('flash').style.opacity = 0.6;
@@ -1992,6 +2030,7 @@ function updateDying(dt) {
   camera.fov = 72 - 14 * lt; camera.updateProjectionMatrix();
   S.glitch = Math.max(S.glitch, 0.7 * k); S.fear = 1;
   ud.head.rotation.set(rand(-0.25, 0.25), rand(-0.25, 0.25), rand(-0.6, 0.6));
+  if (ud.jaw) ud.jaw.rotation.x = rand(0.8, 1.25);           // 턱이 덜컥덜컥 벌어진다
   flashlight.intensity = Math.random() < 0.3 ? 2 : 30;
   if (S.deathT > 1.7) { camera.fov = 72; camera.updateProjectionMatrix(); endGame(false); }
 }
