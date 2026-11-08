@@ -39,7 +39,10 @@
   /* ---------- 오버레이 화면 ---------- */
   .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     background: radial-gradient(ellipse at center, rgba(25,8,8,.82), rgba(0,0,0,.96)); z-index: 10; padding: 16px; }
-  .panel { max-width: 560px; width: 100%; text-align: center; }
+  .panel { max-width: 560px; width: 100%; text-align: center; margin: auto; }
+  /* 화면이 작으면(휴대폰 가로 등) 시작 화면을 스크롤할 수 있게 */
+  .overlay { overflow-y: auto; align-items: flex-start; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
+  @media (max-height: 700px) { .overlay h1 { font-size: clamp(34px, 9vw, 60px); } .sub { margin-bottom: 14px; } .story { font-size: 14px; line-height: 1.7; margin-bottom: 16px; } .keys { margin-bottom: 18px; } }
   .overlay h1 { font-size: clamp(44px, 11vw, 78px); font-weight: 900; letter-spacing: .12em; color: #b31212;
     text-shadow: 0 0 24px rgba(200,0,0,.45), 3px 3px 0 #200; font-family: "Nanum Myeongjo", "Batang", serif;
     animation: shake 4s infinite; }
@@ -371,9 +374,8 @@ function drawWall(g, s, bloody) {
   }
 }
 const wallRough = (g, s) => { g.fillStyle = '#e6e6e6'; g.fillRect(0, 0, s, s); g.fillStyle = '#7a7a7a'; g.fillRect(0, s * 0.58, s, s * 0.42); stains(g, s, 10, 'rgba(60,60,60,.6)', .2); };
-const wT = texSet(512, (g, s) => drawWall(g, s, false), wallRough), bT = texSet(512, (g, s) => drawWall(g, s, true), wallRough);
+const wT = texSet(512, (g, s) => drawWall(g, s, false), wallRough);
 const wallMat = new THREE.MeshStandardMaterial({ map: wT.map, bumpMap: wT.bump, bumpScale: 2.2, roughnessMap: wT.rough, roughness: 1 });
-const bloodWallMat = new THREE.MeshStandardMaterial({ map: bT.map, bumpMap: bT.bump, bumpScale: 2.2, roughnessMap: bT.rough, roughness: 1 });
 // 바닥: 깨진 타일, 줄눈의 때, 고인 물웅덩이(반짝인다), 핏자국
 const puddles = Array.from({ length: 4 }, () => [rand(40, 470), rand(40, 470), rand(30, 80), rand(20, 50), rand(0, 3)]);
 const fT = texSet(512, (g, s) => {
@@ -394,6 +396,190 @@ const fT = texSet(512, (g, s) => {
 }, GW + 2);
 const floorTex = fT.map;
 const floorMat = new THREE.MeshStandardMaterial({ map: fT.map, bumpMap: fT.bump, bumpScale: 1.6, roughnessMap: fT.rough, roughness: 1, metalness: 0.05 });
+/* ---------- 구역별 벽/바닥 (병동 · 놀이방 · 기계실 · 무너진 벽돌) ---------- */
+const H2Y = (s, h) => s * (1 - h / WALL_H);        // 높이(m) → 캔버스 y
+function grime(g, s, k = 1) {                      // 바닥 쪽 때와 그을음, 습기
+  const gr = g.createLinearGradient(0, s * .78, 0, s); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, `rgba(8,6,4,${.85 * k})`);
+  g.fillStyle = gr; g.fillRect(0, s * .78, s, s * .22);
+  const tg = g.createLinearGradient(0, 0, 0, s * .12); tg.addColorStop(0, `rgba(10,8,6,${.6 * k})`); tg.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = tg; g.fillRect(0, 0, s, s * .12);
+}
+function peel(g, s, n, under, yMax) {              // 들쭉날쭉 벗겨진 조각 + 말린 가장자리 그림자
+  for (let i = 0; i < n; i++) {
+    const cx = rand(0, s), cy = rand(0, yMax), R = rand(8, 30), pts = [], p1 = rand(0, 6), p2 = rand(0, 6);
+    for (let k = 0; k < 28; k++) { const a = (k / 28) * Math.PI * 2, r = R * (1 + 0.28 * Math.sin(a * 3 + p1) + 0.14 * Math.sin(a * 7 + p2) + rand(-0.06, 0.06)); pts.push([cx + Math.cos(a) * r * 1.4, cy + Math.sin(a) * r]); }
+    g.beginPath(); pts.forEach(([x, y], k) => g[k ? 'lineTo' : 'moveTo'](x, y)); g.closePath();
+    g.fillStyle = under; g.fill(); g.strokeStyle = 'rgba(15,12,8,.55)'; g.lineWidth = 1.5; g.stroke();
+    g.strokeStyle = 'rgba(230,220,190,.18)'; g.lineWidth = 1; g.beginPath(); pts.slice(0, 6).forEach(([x, y], k) => g[k ? 'lineTo' : 'moveTo'](x, y - 1.5)); g.stroke();
+  }
+}
+// 병동: 칠이 벗겨진 페인트 + 금 간 타일
+function drawHospitalWall(g, s, v) {
+  const [c1, c2, tileTint] = [['#4f5249', '#6b6f62', [0, 4, -4]], ['#3f4c50', '#5e6d72', [-6, 2, 4]], ['#58503f', '#73694f', [6, 2, -10]]][v % 3];
+  const up = g.createLinearGradient(0, 0, 0, s * 0.55); up.addColorStop(0, c1); up.addColorStop(1, c2);
+  g.fillStyle = up; g.fillRect(0, 0, s, s * 0.56);
+  speckle(g, s, 0.07, 14000); stains(g, s, 20, 'rgba(45,32,14,.35)'); stains(g, s, 6, 'rgba(25,32,18,.45)', .2);
+  drips(g, s, rand(18, 40) | 0, '38,24,10');
+  peel(g, s, rand(2, 6) | 0, 'rgba(96,92,80,.4)', s * 0.5);
+  const ty = s * 0.58, th = (s - ty) / 6, tw = s / 8;
+  g.fillStyle = '#23241f'; g.fillRect(0, ty, s, s - ty);
+  for (let r = 0; r < 6; r++) for (let c = 0; c < 8; c++) {
+    if (Math.random() < 0.05 + v * 0.03) { g.fillStyle = '#3a372f'; g.fillRect(c * tw + 2, ty + r * th + 2, tw - 4, th - 4); speckle(g, s, 0, 0); continue; } // 빠진 타일 (회반죽)
+    const b = 118 + rand(-14, 10);
+    g.fillStyle = `rgb(${b + tileTint[0]},${b + tileTint[1]},${b + tileTint[2]})`; g.fillRect(c * tw + 2, ty + r * th + 2, tw - 4, th - 4);
+    const hl = g.createLinearGradient(0, ty + r * th, 0, ty + (r + 1) * th); hl.addColorStop(0, 'rgba(255,255,240,.12)'); hl.addColorStop(1, 'rgba(0,0,0,.2)');
+    g.fillStyle = hl; g.fillRect(c * tw + 2, ty + r * th + 2, tw - 4, th - 4);
+    if (Math.random() < 0.12) { g.strokeStyle = 'rgba(15,14,12,.8)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(c * tw + rand(2, tw), ty + r * th + 2); g.lineTo(c * tw + rand(2, tw), ty + (r + 1) * th - 2); g.stroke(); }
+  }
+  g.fillStyle = '#1d1e1a'; g.fillRect(0, ty - 7, s, 9);
+  crackLines(g, s, 8, 'rgba(15,14,12,.7)', 1.2);
+  grime(g, s);
+}
+// 놀이방: 바랜 아이 벽지(별·풍선·오리), 찢어진 벽지, 나무 징두리, 크레용 낙서
+function drawDaycareWall(g, s, v) {
+  const base = ['#8b7f55', '#846668', '#5f7468'][v % 3], wy = s * 0.6;
+  g.fillStyle = base; g.fillRect(0, 0, s, wy);
+  for (let x = 0; x < s; x += 36) { g.fillStyle = 'rgba(255,240,200,.07)'; g.fillRect(x, 0, 16, wy); }
+  const motif = (x, y, k) => {
+    g.save(); g.translate(x, y); g.globalAlpha = 0.32;
+    if (k === 0) { g.fillStyle = '#e8d890'; g.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5 - Math.PI / 2, r = i % 2 ? 6 : 14; g.lineTo(Math.cos(a) * r, Math.sin(a) * r); } g.fill(); }
+    else if (k === 1) { g.fillStyle = '#d07a7a'; g.beginPath(); g.ellipse(0, 0, 10, 13, 0, 0, Math.PI * 2); g.fill(); g.strokeStyle = '#d0c0a0'; g.beginPath(); g.moveTo(0, 13); g.quadraticCurveTo(5, 24, -2, 34); g.stroke(); }
+    else { g.fillStyle = '#e0c860'; g.beginPath(); g.ellipse(0, 4, 14, 9, 0, 0, Math.PI * 2); g.fill(); g.beginPath(); g.arc(10, -6, 7, 0, Math.PI * 2); g.fill(); g.fillStyle = '#c87830'; g.fillRect(16, -7, 6, 3); }
+    g.restore();
+  };
+  for (let row = 0; row < 5; row++) for (let i = 0; i < 6; i++) motif(i * s / 6 + (row % 2) * s / 12 + 18, row * wy / 5 + 28, (i + row) % 3);
+  stains(g, s, 14, 'rgba(70,50,20,.4)', .3);
+  for (let k = 0; k < 3; k++) { const x = rand(0, s), y = rand(40, wy * 0.7), r = rand(40, 90); g.strokeStyle = 'rgba(60,40,15,.22)'; g.lineWidth = 2.5; blob(g, x, y, r, 22, 0.35); g.stroke(); g.fillStyle = 'rgba(70,50,20,.12)'; g.fill(); } // 물 번진 자국
+  peel(g, s, rand(4, 9) | 0, 'rgba(88,84,74,.92)', wy * 0.95);                   // 찢어진 벽지 밑의 회반죽
+  for (let i = 0; i < 3; i++) { const x = rand(0, s); g.fillStyle = 'rgba(88,84,74,.95)'; g.beginPath(); g.moveTo(x, 0); g.lineTo(x + rand(20, 50), 0); g.lineTo(x + rand(0, 30), rand(80, 220)); g.closePath(); g.fill(); } // 길게 찢겨 늘어진 벽지
+  g.fillStyle = '#2a1d13'; g.fillRect(0, wy, s, s - wy);
+  for (let x = 0; x < s; x += s / 10) {
+    const c = rand(48, 72) | 0; g.fillStyle = `rgb(${c + 16},${c},${c - 14})`; g.fillRect(x + 2, wy + 10, s / 10 - 4, s - wy - 10);
+    g.strokeStyle = 'rgba(20,12,6,.35)'; g.lineWidth = 1; for (let k = 0; k < 4; k++) { const gx = x + rand(4, s / 10 - 4); g.beginPath(); g.moveTo(gx, wy + 10); g.bezierCurveTo(gx + rand(-4, 4), wy + 80, gx + rand(-4, 4), wy + 140, gx + rand(-3, 3), s); g.stroke(); }
+  }
+  g.fillStyle = '#1a120b'; g.fillRect(0, wy, s, 10);
+  const cols = ['#a83228', '#2a4a8a', '#151515', '#3a6a2a', '#c08020'];
+  for (let i = 0; i < rand(4, 9); i++) {                                        // 아이 키 높이의 크레용 낙서
+    g.strokeStyle = cols[(Math.random() * cols.length) | 0]; g.globalAlpha = 0.75; g.lineWidth = rand(2, 4); g.lineCap = 'round';
+    let x = rand(10, s - 10), y = rand(H2Y(s, 1.3), H2Y(s, 0.6)); g.beginPath(); g.moveTo(x, y);
+    for (let k = 0; k < 10; k++) { x += rand(-25, 25); y += rand(-14, 14); g.lineTo(x, y); } g.stroke(); g.globalAlpha = 1;
+  }
+  if (Math.random() < 0.6) { // 막대 사람 그림: 가족, 그리고 그 뒤의 길고 검은 것
+    const bx = rand(40, s - 160), by = H2Y(s, 0.75); g.lineWidth = 3; g.globalAlpha = 0.8;
+    [[0, 1], [40, 0.8], [75, 0.6]].forEach(([dx, k]) => { g.strokeStyle = cols[(dx / 40) | 0]; g.beginPath(); g.arc(bx + dx, by - 60 * k, 9 * k, 0, Math.PI * 2); g.moveTo(bx + dx, by - 51 * k); g.lineTo(bx + dx, by - 20 * k); g.lineTo(bx + dx - 10 * k, by); g.moveTo(bx + dx, by - 20 * k); g.lineTo(bx + dx + 10 * k, by); g.moveTo(bx + dx - 14 * k, by - 40 * k); g.lineTo(bx + dx + 14 * k, by - 40 * k); g.stroke(); });
+    g.strokeStyle = '#080808'; g.lineWidth = 5; g.beginPath(); g.arc(bx + 120, by - 110, 8, 0, Math.PI * 2); g.moveTo(bx + 120, by - 102); g.lineTo(bx + 120, by - 30); g.lineTo(bx + 110, by); g.moveTo(bx + 120, by - 30); g.lineTo(bx + 130, by);
+    g.moveTo(bx + 120, by - 90); g.lineTo(bx + 75, by - 30); g.moveTo(bx + 120, by - 90); g.lineTo(bx + 160, by - 25); g.stroke(); g.globalAlpha = 1;
+  }
+  grime(g, s, 0.8);
+}
+// 기계실: 거푸집 자국 난 콘크리트, 녹물, 기름때, 경고 띠, 스텐실 글자
+function drawConcreteWall(g, s, v) {
+  g.fillStyle = ['#56564f', '#4d5150', '#5b544a'][v % 3]; g.fillRect(0, 0, s, s);
+  for (let i = 0; i < 40; i++) { const x = rand(0, s), y = rand(0, s), r = rand(20, 80), gr = g.createRadialGradient(x, y, 0, x, y, r), c = Math.random() < 0.5 ? '255,255,240' : '0,0,0'; gr.addColorStop(0, `rgba(${c},.05)`); gr.addColorStop(1, `rgba(${c},0)`); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); }
+  speckle(g, s, 0.12, 22000);
+  g.strokeStyle = 'rgba(20,20,18,.5)'; g.lineWidth = 2;
+  for (let y = s / 3; y < s; y += s / 3) { g.beginPath(); g.moveTo(0, y); g.lineTo(s, y + rand(-2, 2)); g.stroke(); }
+  for (let y = s / 6; y < s; y += s / 3) for (let x = s / 8; x < s; x += s / 4) { g.fillStyle = '#1a1a18'; g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.fill(); g.strokeStyle = 'rgba(200,200,190,.15)'; g.beginPath(); g.arc(x, y, 8, 0, Math.PI * 2); g.stroke(); }
+  for (let i = 0; i < rand(3, 7); i++) { const x = rand(0, s), w = rand(3, 12), len = rand(80, 360), gr = g.createLinearGradient(0, 0, 0, len); gr.addColorStop(0, 'rgba(120,55,15,.75)'); gr.addColorStop(1, 'rgba(120,55,15,0)'); g.fillStyle = gr; g.fillRect(x, 0, w, len); } // 녹물
+  stains(g, s, 6, 'rgba(10,10,8,.5)', .2);
+  g.font = 'bold 54px monospace'; g.fillStyle = 'rgba(210,190,60,.3)'; g.textAlign = 'center';
+  g.fillText(['B7', 'C-03', '위험', '구역 4', '출입금지', '07'][(Math.random() * 6) | 0], rand(120, s - 120), rand(s * 0.2, s * 0.45));
+  const by = H2Y(s, 0.32), bh = s * 0.05;
+  g.save(); g.beginPath(); g.rect(0, by, s, bh); g.clip(); g.fillStyle = 'rgba(180,150,30,.55)'; g.fillRect(0, by, s, bh);
+  g.fillStyle = 'rgba(15,15,12,.6)'; for (let x = -bh; x < s + bh; x += bh * 1.6) { g.beginPath(); g.moveTo(x, by); g.lineTo(x + bh * 0.8, by); g.lineTo(x + bh * 1.8, by + bh); g.lineTo(x + bh, by + bh); g.fill(); }
+  speckle(g, s, 0.4, 3000); g.restore();
+  crackLines(g, s, 6, 'rgba(12,12,10,.75)', 1.6, 12, 40);
+  grime(g, s, 1);
+}
+// 무너진 곳: 드러난 벽돌, 남은 회반죽, 곰팡이, 그을음
+function drawBrickWall(g, s, v) {
+  g.fillStyle = '#2e2620'; g.fillRect(0, 0, s, s);
+  const bh = 22, bw = 58;
+  for (let r = 0, y = 0; y < s; r++, y += bh) for (let x = -(r % 2) * bw / 2; x < s; x += bw) {
+    const c = rand(38, 66), bg = g.createLinearGradient(0, y, 0, y + bh);
+    bg.addColorStop(0, `rgb(${c + 22 | 0},${c * 0.66 | 0},${c * 0.52 | 0})`); bg.addColorStop(1, `rgb(${c * 0.8 + 10 | 0},${c * 0.5 | 0},${c * 0.4 | 0})`);
+    g.fillStyle = bg; g.fillRect(x + 2, y + 2, bw - 4, bh - 4);
+    if (Math.random() < 0.2) { g.fillStyle = 'rgba(20,14,10,.6)'; g.fillRect(x + rand(2, bw - 14), y + 2, rand(6, 14), rand(4, 10)); }
+  }
+  speckle(g, s, 0.15, 12000);
+  for (let i = 0; i < rand(3, 6); i++) {                                      // 남은 회반죽 덩어리
+    const cx = rand(0, s), cy = rand(0, s * 0.7), R = rand(50, 120);
+    g.beginPath(); for (let k = 0; k < 18; k++) { const a = (k / 18) * Math.PI * 2, r = R * rand(0.5, 1.2); g[k ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * r * 1.4, cy + Math.sin(a) * r); } g.closePath();
+    g.fillStyle = ['#4e4b42', '#47493f', '#534c3f'][v % 3]; g.fill(); g.strokeStyle = 'rgba(8,6,4,.85)'; g.lineWidth = 3; g.stroke();
+    g.save(); g.clip(); speckle(g, s, 0.1, 3000); stains(g, s, 6, 'rgba(40,30,15,.4)', .2); g.restore();
+  }
+  stains(g, s, 30, 'rgba(10,8,6,.45)', .3);                                    // 찌든 때
+  stains(g, s, 12, 'rgba(18,30,14,.6)', .25);                                  // 곰팡이
+  stains(g, s, 6, 'rgba(5,5,5,.6)', .3);                                       // 그을음
+  drips(g, s, 20, '20,26,14');
+  grime(g, s, 1.1);
+}
+const WALL_DRAW = [drawHospitalWall, drawDaycareWall, drawConcreteWall, drawBrickWall];
+const genRough = (base, wetN) => (g, s) => { g.fillStyle = base; g.fillRect(0, 0, s, s); stains(g, s, wetN, 'rgba(25,25,25,.7)', .25); };
+const zoneWallMats = WALL_DRAW.map((fn, z) => [0, 1, 2].map(v => {
+  const t = texSet(512, (g, s) => fn(g, s, v), genRough(['#cfcfcf', '#e0e0e0', '#bbbbbb', '#d8d8d8'][z], 6));
+  return new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bump, bumpScale: [2.2, 1.6, 3, 4][z], roughnessMap: t.rough, roughness: 1 });
+}));
+// 바닥
+function drawFloor(g, s, z) {
+  const puddleList = Array.from({ length: (rand(1, 4) | 0) }, () => [rand(40, 470), rand(40, 470), rand(30, 90), rand(20, 55), rand(0, 3)]);
+  if (z === 0) {         // 병동: 체크무늬 타일
+    g.fillStyle = '#1f1d19'; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+      const v = 92 + Math.random() * 30, c = (i + j) % 2 ? v : v - 26, w = s / 4;
+      g.fillStyle = `rgb(${c},${c - 4},${c - 11})`; g.fillRect(i * w + 3, j * w + 3, w - 6, w - 6);
+      if (Math.random() < 0.3) { g.strokeStyle = 'rgba(10,9,8,.85)'; g.lineWidth = 2; g.beginPath(); g.moveTo(i * w + rand(0, w), j * w + 3); g.lineTo(i * w + rand(0, w), j * w + rand(w * .3, w)); g.lineTo(i * w + w - 3, j * w + rand(0, w)); g.stroke(); }
+    }
+  } else if (z === 1) {  // 놀이방: 낡은 나무 마루
+    g.fillStyle = '#1c130c'; g.fillRect(0, 0, s, s);
+    const bw = s / 7;
+    for (let i = 0; i < 7; i++) for (let seg = 0, y = -rand(0, 200); y < s; seg++) {
+      const len = rand(160, 320), c = rand(55, 85);
+      g.fillStyle = `rgb(${c + 18 | 0},${c | 0},${c * 0.7 | 0})`; g.fillRect(i * bw + 2, y + 2, bw - 4, len - 4);
+      g.strokeStyle = 'rgba(25,15,8,.35)'; g.lineWidth = 1; for (let k = 0; k < 5; k++) { const gx = i * bw + rand(4, bw - 4); g.beginPath(); g.moveTo(gx, y); g.bezierCurveTo(gx + rand(-5, 5), y + len * .3, gx + rand(-5, 5), y + len * .6, gx, y + len); g.stroke(); }
+      if (Math.random() < 0.3) { g.fillStyle = 'rgba(15,10,5,.7)'; g.beginPath(); g.ellipse(i * bw + bw / 2, y + rand(20, len - 20), 4, 7, 0, 0, Math.PI * 2); g.fill(); } // 옹이
+      y += len;
+    }
+    for (let i = 0; i < 4; i++) { g.strokeStyle = ['#a83228', '#2a4a8a', '#c08020'][i % 3]; g.globalAlpha = 0.5; g.lineWidth = 3; let x = rand(0, s), y = rand(0, s); g.beginPath(); g.moveTo(x, y); for (let k = 0; k < 6; k++) { x += rand(-30, 30); y += rand(-30, 30); g.lineTo(x, y); } g.stroke(); g.globalAlpha = 1; }
+  } else if (z === 2) {  // 기계실: 콘크리트 바닥, 배수구, 노란 선
+    g.fillStyle = '#4a4943'; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 30; i++) { const x = rand(0, s), y = rand(0, s), r = rand(20, 90), gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(0,0,0,.12)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); }
+    speckle(g, s, 0.12, 20000);
+    g.strokeStyle = 'rgba(15,15,12,.7)'; g.lineWidth = 3; g.beginPath(); g.moveTo(s / 2, 0); g.lineTo(s / 2, s); g.moveTo(0, s / 2); g.lineTo(s, s / 2); g.stroke();
+    g.fillStyle = 'rgba(190,160,40,.35)'; g.fillRect(rand(20, 60), 0, 14, s);
+    stains(g, s, 6, 'rgba(10,10,8,.65)', .2);                                    // 기름때
+    if (Math.random() < 0.5) { const cx = rand(120, 390), cy = rand(120, 390); g.fillStyle = '#121210'; g.beginPath(); g.arc(cx, cy, 34, 0, Math.PI * 2); g.fill(); g.strokeStyle = '#3a3a34'; g.lineWidth = 3; for (let k = -24; k <= 24; k += 8) { g.beginPath(); g.moveTo(cx + k, cy - Math.sqrt(900 - k * k)); g.lineTo(cx + k, cy + Math.sqrt(900 - k * k)); g.stroke(); } }
+  } else {               // 무너진 곳: 깨진 타일 위의 진흙, 흙, 잔해
+    g.fillStyle = '#2a241c'; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) if (Math.random() < 0.55) { const c = rand(70, 100), w = s / 4; g.fillStyle = `rgb(${c},${c - 6},${c - 14})`; g.fillRect(i * w + 3 + rand(-3, 3), j * w + 3 + rand(-3, 3), w - 6, w - 6); }
+    stains(g, s, 24, 'rgba(35,26,14,.7)', .3); speckle(g, s, 0.2, 20000);
+    for (let i = 0; i < 300; i++) { g.fillStyle = `rgba(${rand(20, 80) | 0},${rand(18, 60) | 0},${rand(10, 40) | 0},.8)`; g.fillRect(rand(0, s), rand(0, s), rand(1, 4), rand(1, 4)); }
+  }
+  speckle(g, s, 0.08, 6000); stains(g, s, 10, 'rgba(30,22,10,.45)', .3);
+  for (const [x, y, rx, ry, a] of puddleList) { g.fillStyle = 'rgba(10,10,8,.55)'; g.beginPath(); g.ellipse(x, y, rx, ry, a, 0, Math.PI * 2); g.fill(); }
+  g._puddles = puddleList;
+}
+const zoneFloorMats = [0, 1, 2, 3].map(z => [0, 1].map(() => {
+  let pl = [];
+  const t = texSet(512, (g, s) => { drawFloor(g, s, z); pl = g._puddles; }, (g, s) => {
+    g.fillStyle = ['#c8c8c8', '#d5d5d5', '#b8b8b8', '#9a9a9a'][z]; g.fillRect(0, 0, s, s);
+    for (const [x, y, rx, ry, a] of pl) { g.fillStyle = '#121212'; g.beginPath(); g.ellipse(x, y, rx, ry, a, 0, Math.PI * 2); g.fill(); }
+  });
+  return new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bump, bumpScale: [1.6, 2.4, 1.2, 3][z], roughnessMap: t.rough, roughness: 1, metalness: 0.05 });
+}));
+let zoneMap = null;
+const zoneAt = (x, z) => zoneMap[clamp(z, 0, GH - 1) * GW + clamp(x, 0, GW - 1)];
+function assignZones() {                          // 미로를 네 구역으로 (보로노이)
+  zoneMap = new Uint8Array(GW * GH);
+  const q = [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]].map(([a, b]) => [a * GW + rand(-3, 3), b * GH + rand(-3, 3)]);
+  const ids = [0, 1, 2, 3].sort(() => Math.random() - .5);
+  for (let z = 0; z < GH; z++) for (let x = 0; x < GW; x++) {
+    let best = 0, bd = 1e9;
+    q.forEach(([qx, qz], i) => { const d = (qx - x) ** 2 + (qz - z) ** 2 + Math.sin(x * 1.7 + z * 0.9) * 6; if (d < bd) { bd = d; best = i; } });
+    zoneMap[z * GW + x] = ids[best];
+  }
+}
+
 // 천장: 물에 젖어 처진 석고 패널, 빠진 칸 사이로 보이는 어둠
 const cT = texSet(512, (g, s) => {
   g.fillStyle = '#4a4943'; g.fillRect(0, 0, s, s);
@@ -832,84 +1018,175 @@ function hasLOS(a, b) {
 /* =========================================================
    괴물 모델
    ========================================================= */
+/* ---------- 조각 도우미: 깎아 만든 몸 ---------- */
+function sculpt(geo, fn) { const p = geo.attributes.position, v = new THREE.Vector3(); for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); fn(v); p.setXYZ(i, v.x, v.y, v.z); } geo.computeVertexNormals(); return geo; }
+// 반지름 목록을 따라 깎은 팔다리 (위 0 → 아래 -len), 관절이 툭 튀어나온다
+function limbGeo(len, radii, seg = 12) {
+  const n = radii.length, pts = [new THREE.Vector2(0.0001, -len)];
+  for (let i = n - 1; i >= 0; i--) pts.push(new THREE.Vector2(radii[i], -len * i / (n - 1)));
+  pts.push(new THREE.Vector2(0.0001, 0));
+  return new THREE.LatheGeometry(pts, seg);
+}
+// 점 c 주변을 바깥(+)/안쪽(-)으로 부풀리거나 꺼뜨린다
+const dent = (v, cx, cy, cz, r, k) => { const d = Math.hypot(v.x - cx, v.y - cy, v.z - cz); if (d < r) v.multiplyScalar(1 + k * (1 - d / r) ** 2); };
+// 길고 마디진 손가락
+function makeHand(parent, y, mat, nailMat, fl, curl) {
+  const hand = new THREE.Group(); hand.position.y = y; parent.add(hand);
+  const palm = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), mat); palm.scale.set(0.03, 0.042, 0.014); palm.position.y = -0.035; hand.add(palm);
+  for (let f = 0; f < 5; f++) {
+    const thumb = f === 4, base = new THREE.Group();
+    base.position.set(thumb ? 0.03 : (f - 1.5) * 0.015, thumb ? -0.03 : -0.072, thumb ? 0.01 : 0); base.rotation.set(curl * 0.4, 0, thumb ? -0.7 : (f - 1.5) * 0.06); hand.add(base);
+    let seg = base; const L = fl * (thumb ? 0.55 : [0.9, 1, 0.95, 0.75][f]);
+    [0.45, 0.32, 0.23].forEach((k, si) => {
+      const l = L * k, ph = new THREE.Mesh(new THREE.CylinderGeometry(0.0055 - si * 0.0012, 0.0068 - si * 0.0012, l, 6), mat); ph.position.y = -l / 2; seg.add(ph);
+      const kn = new THREE.Mesh(new THREE.SphereGeometry(0.0068 - si * 0.001, 6, 5), mat); seg.add(kn);
+      const nx = new THREE.Group(); nx.position.y = -l; nx.rotation.x = curl * (0.35 + si * 0.15); seg.add(nx); seg = nx;
+    });
+    const nail = new THREE.Mesh(new THREE.ConeGeometry(0.0045, 0.022, 4), nailMat); nail.position.y = -0.008; nail.rotation.x = Math.PI; seg.add(nail);
+  }
+  return hand;
+}
+// 실 같은 머리카락 다발 (알파 텍스처)
+const hairTex = canvasTex(64, (c, s) => {
+  c.clearRect(0, 0, s, s);
+  for (let i = 0; i < 70; i++) { const x = rand(0, s), w = rand(0.6, 1.8), end = rand(0.55, 1) * s; const gr = c.createLinearGradient(0, 0, 0, end); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.85, 'rgba(255,255,255,.9)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = gr; c.fillRect(x, 0, w, end); }
+});
+const hairMatShared = new THREE.MeshStandardMaterial({ color: 0x060505, roughness: 0.4, alphaMap: hairTex, alphaTest: 0.4, side: THREE.DoubleSide, transparent: false });
+// 찢어지고 얼룩진 환자복
+const gownTex = canvasTex(256, (c, s) => {
+  c.fillStyle = '#8f897a'; c.fillRect(0, 0, s, s);
+  c.strokeStyle = 'rgba(60,70,80,.25)'; c.lineWidth = 3; for (let x = 0; x < s; x += 18) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, s); c.stroke(); }
+  stains(c, s, 18, 'rgba(70,50,20,.55)', .35); stains(c, s, 7, 'rgba(95,5,5,.85)', .22); drips(c, s, 14, '90,5,5', s * .2);
+  speckle(c, s, .15, 3000);
+  c.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 9; i++) { blob(c, rand(0, s), rand(s * .1, s * .9), rand(6, 22), 14, 0.7); c.fill(); }   // 찢어진 구멍
+  c.beginPath(); c.moveTo(0, s); for (let x = 0; x <= s; x += 8) c.lineTo(x, s - rand(0, s * 0.22)); c.lineTo(s, s); c.fill(); // 너덜너덜한 밑단
+  c.globalCompositeOperation = 'source-over';
+});
+const porcelainTex = canvasTex(256, (c, s) => {
+  c.fillStyle = '#b9b2a4'; c.fillRect(0, 0, s, s); speckle(c, s, .1, 4000); stains(c, s, 16, 'rgba(80,65,40,.4)', .3); stains(c, s, 5, 'rgba(30,22,15,.5)', .2);
+  crackLines(c, s, 14, 'rgba(25,18,12,.85)', 1.2, 10, 26);
+  for (let i = 0; i < 5; i++) { c.fillStyle = '#4a4036'; blob(c, rand(0, s), rand(0, s), rand(3, 9), 10, 0.8); c.fill(); }  // 떨어져 나간 조각
+});
+
 function makeMonster(o = {}) {
-  // 기본: 창백하고 깡마른 형체, 얼굴을 덮은 긴 검은 머리카락, 텅 빈 눈
+  // 기본: 앙상하게 말라 갈비뼈가 드러난 몸, 얼굴을 덮은 긴 검은 머리, 움푹 꺼진 눈
   const g = new THREE.Group();
   const base = new THREE.Color(o.skin ?? 0xbdb5a8);
-  const skinTex = o.porcelain ? null : canvasTex(128, (c, s) => {      // 핏줄과 멍이 비치는 창백한 피부
+  const skinTex = o.porcelain ? porcelainTex : canvasTex(256, (c, s) => {      // 핏줄과 멍이 비치는 창백한 피부
     c.fillStyle = '#' + base.getHexString(); c.fillRect(0, 0, s, s);
-    speckle(c, s, 0.1, 1500); stains(c, s, 6, 'rgba(80,60,90,.35)', .2); stains(c, s, 5, 'rgba(60,40,25,.45)', .25);
-    c.lineWidth = 1;
-    for (let i = 0; i < 9; i++) {
-      c.strokeStyle = `rgba(${rand(50, 80) | 0},${rand(40, 60) | 0},${rand(90, 120) | 0},.55)`;
+    speckle(c, s, 0.1, 5000); stains(c, s, 10, 'rgba(80,60,90,.35)', .2); stains(c, s, 8, 'rgba(60,40,25,.45)', .25);
+    c.lineWidth = 1.2;
+    for (let i = 0; i < 22; i++) {
+      c.strokeStyle = `rgba(${rand(50, 80) | 0},${rand(40, 60) | 0},${rand(90, 120) | 0},.5)`;
       let x = rand(0, s), y = rand(0, s); c.beginPath(); c.moveTo(x, y);
-      for (let k = 0; k < 8; k++) { x += rand(-12, 12); y += rand(4, 14); c.lineTo(x, y); } c.stroke();
+      for (let k = 0; k < 10; k++) { x += rand(-14, 14); y += rand(4, 16); c.lineTo(x, y); } c.stroke();
     }
-    stains(c, s, 2, 'rgba(90,10,10,.6)', .15);
+    stains(c, s, 4, 'rgba(90,10,10,.6)', .15); stains(c, s, 6, 'rgba(30,25,20,.5)', .2);
   });
-  const skin = new THREE.MeshStandardMaterial({ color: skinTex ? 0xffffff : base, map: skinTex, bumpMap: skinTex, bumpScale: 1.2, roughness: o.rough ?? 0.55, metalness: o.metal ?? 0 });
-  const bruise = new THREE.MeshStandardMaterial({ color: o.joint ?? 0x6d6258, roughness: 0.8 });
-  const gown = new THREE.MeshStandardMaterial({ color: 0x8a8476, roughness: 1, side: THREE.DoubleSide,
-    map: canvasTex(64, (c, s) => { c.fillStyle = '#9a9384'; c.fillRect(0, 0, s, s); stains(c, s, 10, 'rgba(60,40,20,.6)', .4); stains(c, s, 4, 'rgba(90,5,5,.8)', .25); }) });
-  const hairMat = new THREE.MeshStandardMaterial({ color: 0x030303, roughness: 0.45, side: THREE.DoubleSide });
+  const skin = new THREE.MeshStandardMaterial({ map: skinTex, bumpMap: skinTex, bumpScale: o.porcelain ? 0.8 : 1.4, roughness: o.rough ?? 0.5, metalness: o.metal ?? 0, color: o.porcelain ? 0xffffff : 0xffffff });
+  const bruise = new THREE.MeshStandardMaterial({ color: o.joint ?? 0x6d6258, roughness: o.porcelain ? 0.3 : 0.8 });
+  const nailMat = new THREE.MeshStandardMaterial({ color: 0x2a1c14, roughness: 0.3 });
   const voidMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
   const add = (geo, mat, x, y, z, parent = g) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); parent.add(m); return m; };
   const body = new THREE.Group(); g.add(body);
-  add(new THREE.CylinderGeometry(0.12, 0.17, 1.0, 8), skin, 0, 1.65, 0, body);
+
+  // 몸통: 잘록한 허리, 드러난 갈비뼈와 척추, 쇄골, 꺼진 배
+  const prof = [[0.92, 0.12], [1.02, 0.145], [1.15, 0.125], [1.3, 0.1], [1.45, 0.11], [1.6, 0.14], [1.75, 0.158], [1.9, 0.165], [2.02, 0.16], [2.12, 0.14], [2.2, 0.09], [2.26, 0.05]];
+  const torso = new THREE.LatheGeometry([new THREE.Vector2(0.0001, 0.9), ...prof.map(([y, r]) => new THREE.Vector2(r, y)), new THREE.Vector2(0.0001, 2.28)], 22);
+  sculpt(torso, v => {
+    v.z *= 0.66;
+    const front = v.z > 0, a = Math.atan2(v.x, v.z);
+    if (!o.porcelain) {
+      if (v.y > 1.52 && v.y < 2.04) { const rib = Math.max(0, Math.sin((v.y - 1.52) * Math.PI * 8.5)) ** 3 * (Math.abs(a) < 2.2 ? 1 : 0.3); v.x *= 1 + rib * (o.ribs ?? 0.09); v.z *= 1 + rib * (o.ribs ?? 0.09); }
+      if (front && v.y > 1.12 && v.y < 1.48) v.z -= 0.025 * Math.sin((v.y - 1.12) / 0.36 * Math.PI);           // 꺼진 배
+      if (front && Math.abs(v.x) < 0.02 && v.y > 1.55 && v.y < 2.0) v.z -= 0.01;                               // 흉골 골
+      if (!front && Math.abs(v.x) < 0.035) v.z -= Math.max(0, Math.sin(v.y * 55)) * (o.spine ?? 0.014);     // 척추 마디
+      if (v.y > 2.1 && v.y < 2.2 && front) v.z += 0.012;                                                       // 쇄골
+      for (const sx of [-1, 1]) dent(v, sx * 0.09, 1.95, -0.09, 0.08, 0.12);                                   // 날개뼈
+    } else if (Math.abs(v.y - 1.45) < 0.012) v.multiplyScalar(0.97);                                             // 인형 허리 이음매
+  });
+  add(torso, skin, 0, 0, 0, body).castShadow = true;
+  if (o.porcelain) { const seam = add(new THREE.TorusGeometry(0.11, 0.008, 6, 20), bruise, 0, 1.45, 0, body); seam.rotation.x = Math.PI / 2; seam.scale.z = 0.66; }
   if (o.gown !== false) {
-    // 너덜너덜한 옷
-    const gg = new THREE.CylinderGeometry(0.2, 0.36, 1.45, 10, 4, true), gp = gg.attributes.position;
-    for (let i = 0; i < gp.count; i++) if (gp.getY(i) < -0.7) gp.setY(i, gp.getY(i) - Math.random() * 0.25);
-    gg.computeVertexNormals();
-    add(gg, gown, 0, 1.5, 0, body);
-    add(new THREE.SphereGeometry(0.2, 8, 6), gown, 0, 2.08, 0, body).scale.set(1.2, 0.6, 0.75);
-  } else {
-    add(new THREE.SphereGeometry(0.22, 10, 8), skin, 0, 2.02, 0, body).scale.set(1.25, 0.75, 0.7);   // 어깨
-    add(new THREE.SphereGeometry(0.17, 10, 8), skin, 0, 1.12, 0, body).scale.set(1.15, 0.7, 0.8);   // 골반
+    const gp = [[0.5, 0.3], [0.75, 0.25], [0.98, 0.2], [1.2, 0.17], [1.45, 0.165], [1.65, 0.19], [1.85, 0.2], [2.02, 0.2], [2.12, 0.17], [2.2, 0.1]];
+    const gg = sculpt(new THREE.LatheGeometry(gp.map(([y, r]) => new THREE.Vector2(r, y)), 26), v => {
+      const a = Math.atan2(v.x, v.z), fold = 1 + 0.07 * Math.sin(a * 9 + v.y * 4) * Math.max(0, 1.4 - v.y) + 0.02 * Math.sin(a * 23);
+      v.x *= fold; v.z *= fold * 0.78;
+    });
+    add(gg, new THREE.MeshStandardMaterial({ map: gownTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 1 }), 0, 0, 0, body);
   }
-  const neck = add(new THREE.CylinderGeometry(0.035, 0.05, 0.42, 6), skin, 0, 2.3, 0.02, body); neck.rotation.x = 0.2;
+  // 목: 힘줄이 선 가는 목
+  const neck = add(limbGeo(0.3, [0.04, 0.034, 0.032, 0.036, 0.048], 10), skin, 0, 2.5, 0.05, body); neck.rotation.x = -0.18;
+
+  // 머리: 움푹 꺼진 눈구멍, 광대뼈, 꺼진 뺨, 좁은 턱
   const head = new THREE.Group(); head.position.set(0, 2.52, 0.07); body.add(head);
-  add(new THREE.SphereGeometry(0.16, 12, 10), skin, 0, 0, 0, head).scale.set(0.82, o.headY ?? 1.22, 0.92);
+  const hg = sculpt(new THREE.SphereGeometry(0.16, 40, 30), v => {
+    for (const sx of [-1, 1]) {
+      dent(v, sx * 0.056, 0.03, 0.14, 0.068, o.eyes === false ? -0.12 : -0.22);   // 눈구멍
+      dent(v, sx * 0.085, -0.06, 0.1, 0.06, -0.1);                                 // 꺼진 뺨
+      dent(v, sx * 0.095, -0.005, 0.105, 0.04, 0.06);                              // 광대
+      dent(v, sx * 0.14, 0.045, 0.03, 0.06, -0.06);                                // 관자놀이
+    }
+    dent(v, 0, 0.075, 0.14, 0.07, 0.04);                                           // 눈썹뼈
+    dent(v, 0, -0.005, 0.158, 0.03, o.porcelain ? 0.06 : 0.04);                    // 콧대
+    dent(v, 0, -0.15, 0.09, 0.06, 0.05);                                           // 턱끝
+    if (v.y < -0.04) v.x *= 1 - Math.min(1, (-0.04 - v.y) / 0.12) * 0.28;           // 좁은 턱
+    if (v.z < 0) v.multiplyScalar(1.04);                                           // 뒤통수
+    if (o.ridges && v.z < 0.02) v.multiplyScalar(1 + Math.max(0, Math.sin(v.y * 70)) * 0.025);   // 길쭉한 머리의 굴곡
+  });
+  add(hg, skin, 0, 0, 0, head).scale.set(0.82, o.headY ?? 1.22, 0.92);
   if (o.eyes !== false) for (const sx of [-1, 1]) {
-    add(new THREE.SphereGeometry(0.045, 8, 8), voidMat, sx * 0.058, 0.03, 0.115, head).scale.set(1, 1.25, 0.6);
+    add(new THREE.SphereGeometry(0.036, 10, 8), voidMat, sx * 0.046, 0.035, 0.102, head).scale.set(1, 1.3, 0.6);
     if (o.pupils !== false) {
-      add(new THREE.SphereGeometry(0.008, 6, 6), new THREE.MeshBasicMaterial({ color: 0xfff6e0, fog: false }), sx * 0.058, 0.025, 0.145, head);
-      const tear = add(new THREE.BoxGeometry(0.009, rand(0.1, 0.16), 0.006), new THREE.MeshStandardMaterial({ color: 0x3a0303, roughness: 0.2 }), sx * 0.06, -0.06, 0.125, head); // 피눈물
-      tear.rotation.x = -0.35;
+      add(new THREE.SphereGeometry(0.0065, 6, 6), new THREE.MeshBasicMaterial({ color: 0xfff6e0, fog: false }), sx * 0.046, 0.03, 0.12, head);
+      const tear = add(new THREE.CylinderGeometry(0.004, 0.006, rand(0.12, 0.18), 5), new THREE.MeshStandardMaterial({ color: 0x3a0303, roughness: 0.15 }), sx * 0.05, -0.055, 0.117, head); // 피눈물
+      tear.rotation.x = -0.25;
     }
   }
   const mouthBase = o.mouth ?? [0.7, 1.5, 0.45];
-  const mouth = add(new THREE.SphereGeometry(0.055, 10, 8), voidMat, 0, -0.1, 0.12, head); mouth.scale.set(...mouthBase);
-  if (o.teeth) for (let i = 0; i < 9; i++) { // 세로로 찢어진 입 양옆의 이빨
-    const t = add(new THREE.ConeGeometry(0.008, 0.035, 3), new THREE.MeshStandardMaterial({ color: 0xcfc4a8 }), (i % 2 ? 1 : -1) * 0.03, -0.17 + i * 0.016, 0.135, head);
-    t.rotation.z = (i % 2 ? 1 : -1) * Math.PI / 2;
-  }
+  const mouth = add(new THREE.SphereGeometry(0.05, 12, 10), voidMat, 0, -0.105, 0.112, head); mouth.scale.set(...mouthBase);
+  const toothMat = new THREE.MeshStandardMaterial({ color: 0xc9bc9a, roughness: 0.4 });
+  if (o.teeth) for (let i = 0; i < 16; i++) {                                     // 세로로 찢어진 입 양옆에 빼곡한 이빨
+    const sd = i % 2 ? 1 : -1, t = add(new THREE.ConeGeometry(0.006, rand(0.025, 0.04), 4), toothMat, sd * 0.024, -0.2 + (i >> 1) * 0.02, 0.118, head);
+    t.rotation.z = sd * Math.PI / 2;
+  } else if (o.porcelain !== true) for (let i = 0; i < 6; i++) { const t = add(new THREE.ConeGeometry(0.005, 0.02, 4), toothMat, (i - 2.5) * 0.01, -0.085, 0.13, head); t.rotation.x = Math.PI; }
   const hair = new THREE.Group(); head.add(hair);
-  if (o.hair !== false) for (let i = 0; i < 26; i++) { // 얼굴 가운데만 살짝 보이게
-    let a = rand(-Math.PI, Math.PI); if (Math.abs(a) < 0.3) a = Math.sign(a || 1) * rand(0.3, 0.6);
-    const len = Math.abs(a) < 1 ? rand(0.55, 0.95) : rand(0.6, 1.1);
-    const strand = new THREE.Mesh(new THREE.PlaneGeometry(rand(0.05, 0.09), len), hairMat);
-    strand.position.set(Math.sin(a) * 0.15, 0.17 - len / 2, Math.cos(a) * 0.15 + 0.01);
-    strand.rotation.set(rand(-0.08, 0.08), a, rand(-0.06, 0.06)); hair.add(strand);
+  if (o.hair !== false) {                                                         // 얼굴 앞으로도 몇 가닥이 흘러내린다
+    for (let i = 0; i < 40; i++) {
+      let a = rand(-Math.PI, Math.PI); const front = i < 4;
+      if (front) a = rand(-0.28, 0.28); else if (Math.abs(a) < 0.42) a = Math.sign(a || 1) * rand(0.42, 0.8);
+      const len = front ? rand(0.45, 0.7) : Math.abs(a) < 1.2 ? rand(0.6, 0.95) : rand(0.7, 1.15), w = front ? rand(0.02, 0.035) : rand(0.06, 0.11);
+      const pg = sculpt(new THREE.PlaneGeometry(w, len, 1, 8), v => { const t = (len / 2 - v.y) / len; v.z += t * t * (front ? 0.05 : 0.12) + Math.sin(t * 6 + i) * 0.01; });
+      const strand = new THREE.Mesh(pg, hairMatShared);
+      strand.position.set(Math.sin(a) * 0.15, 0.17 - len / 2, Math.cos(a) * 0.15 + (front ? 0.03 : 0.01));
+      strand.rotation.set(rand(-0.08, 0.08) - (front ? 0.12 : 0), a, rand(-0.06, 0.06)); hair.add(strand);
+    }
+    const cap = add(new THREE.SphereGeometry(0.168, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), hairMatShared, 0, 0.012, -0.005, hair); cap.scale.set(0.84, 1.22, 0.95);
   }
+  // 팔: 이두·팔꿈치 마디가 드러난 긴 팔, 마디진 긴 손가락
   const arms = [], armL = o.armLen ?? 0.9;
   for (const sx of [-1, 1]) {
-    const sh = new THREE.Group(); sh.position.set(sx * 0.27, 2.1, 0); body.add(sh);
-    add(new THREE.CylinderGeometry(0.035, 0.03, armL, 6), skin, 0, -armL / 2, 0, sh);
-    add(new THREE.SphereGeometry(0.04, 6, 6), bruise, 0, -armL, 0, sh);
+    const sh = new THREE.Group(); sh.position.set(sx * 0.26, 2.1, 0); body.add(sh);
+    add(new THREE.SphereGeometry(0.05, 12, 10), o.porcelain ? bruise : skin, 0, 0, 0, sh).scale.set(1, 0.9, 0.85);      // 어깨
+    add(limbGeo(armL, [0.036, 0.04, 0.034, 0.028, 0.026, 0.03]), skin, 0, 0, 0, sh);
+    add(new THREE.SphereGeometry(o.porcelain ? 0.034 : 0.03, 10, 8), bruise, 0, -armL, 0, sh);
     const fore = new THREE.Group(); fore.position.set(0, -armL, 0); sh.add(fore);
-    add(new THREE.CylinderGeometry(0.028, 0.02, armL, 6), skin, 0, -armL / 2, 0, fore);
-    for (let f = 0; f < 5; f++) { const c = add(new THREE.CylinderGeometry(0.007, 0.003, 0.28, 4), skin, (f - 2) * 0.018, -armL - 0.12, 0.02, fore); c.rotation.set(0.25, 0, (f - 2) * 0.08); }
+    add(limbGeo(armL, [0.029, 0.028, 0.025, 0.021, 0.017, 0.019]), skin, 0, 0, 0, fore);
+    makeHand(fore, -armL, skin, nailMat, o.fingers ?? 0.24, o.porcelain ? 0.15 : 0.45);
     sh.rotation.z = sx * 0.1; arms.push({ sh, fore });
   }
+  // 다리: 앙상한 허벅지, 튀어나온 무릎뼈, 긴 발가락
   const legs = [], knees = [];
   for (const sx of [-1, 1]) {
     const hip = new THREE.Group(); hip.position.set(sx * 0.1, 0.92, 0); body.add(hip);
-    add(new THREE.CylinderGeometry(0.05, 0.036, 0.47, 8), skin, 0, -0.235, 0, hip);
-    add(new THREE.SphereGeometry(0.04, 8, 6), bruise, 0, -0.47, 0, hip);                 // 툭 튀어나온 무릎뼈
+    add(limbGeo(0.47, [0.052, 0.054, 0.046, 0.038, 0.033, 0.038]), skin, 0, 0, 0, hip);
+    add(new THREE.SphereGeometry(o.porcelain ? 0.042 : 0.036, 10, 8), bruise, 0, -0.47, 0.012, hip);
     const knee = new THREE.Group(); knee.position.y = -0.47; hip.add(knee);
-    add(new THREE.CylinderGeometry(0.034, 0.024, 0.46, 8), skin, 0, -0.23, 0, knee);
-    add(new THREE.BoxGeometry(0.06, 0.03, 0.16), skin, 0, -0.46, 0.04, knee);            // 맨발
+    add(limbGeo(0.44, [0.036, 0.034, 0.028, 0.022, 0.018, 0.02]), skin, 0, 0, 0, knee);
+    const foot = add(new THREE.SphereGeometry(1, 10, 8), skin, 0, -0.455, 0.05, knee); foot.scale.set(0.034, 0.02, 0.085);
+    for (let t = 0; t < 5; t++) { const toe = add(new THREE.CylinderGeometry(0.006, 0.007, 0.05, 5), skin, (t - 2) * 0.011, -0.462, 0.14, knee); toe.rotation.x = Math.PI / 2 + 0.3; }
+    if (o.porcelain) add(new THREE.SphereGeometry(0.06, 10, 8), bruise, 0, 0, 0, hip);
     legs.push(hip); knees.push(knee);
   }
   if (o.scale) g.scale.setScalar(o.scale);
@@ -931,10 +1208,16 @@ function makeCrawler() {
   const dark = new THREE.MeshStandardMaterial({ color: 0x4a3d36, roughness: 0.7 });
   const voidMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
   const body = new THREE.Group(); flip.add(body);
-  const torso = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 10), skin); torso.scale.set(0.9, 0.55, 1.5); torso.position.y = 0.38; body.add(torso);
+  // 몸통: 마디마다 갈비처럼 불룩한 체절, 등 위로 솟은 뼈
+  const tg = sculpt(new THREE.SphereGeometry(0.3, 28, 20), v => { v.multiplyScalar(1 + Math.max(0, Math.sin(v.z * 38)) * 0.05 + Math.sin(v.x * 30 + v.z * 20) * 0.01); if (v.y > 0.1) v.y += Math.max(0, Math.sin(v.z * 38)) * 0.02; });
+  const torso = new THREE.Mesh(tg, skin); torso.scale.set(0.9, 0.55, 1.5); torso.position.y = 0.38; body.add(torso);
   for (let i = 0; i < 6; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 5), dark); b.position.set(0, 0.55, -0.35 + i * 0.13); body.add(b); } // 등뼈
   const head = new THREE.Group(); head.position.set(0, 0.36, 0.5); body.add(head);
-  const face = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10), skin); face.scale.set(0.85, 1.05, 0.9); head.add(face);
+  const fgeo = sculpt(new THREE.SphereGeometry(0.17, 32, 24), v => {           // 사람 얼굴: 꺼진 눈두덩, 광대, 좁은 턱
+    for (const sx of [-1, 1]) { dent(v, sx * 0.06, 0.05, 0.14, 0.07, -0.15); dent(v, sx * 0.09, -0.05, 0.11, 0.06, -0.1); dent(v, sx * 0.1, 0.0, 0.11, 0.04, 0.06); }
+    dent(v, 0, 0.0, 0.165, 0.03, 0.05); if (v.y < -0.04) v.x *= 1 - Math.min(1, (-0.04 - v.y) / 0.12) * 0.25;
+  });
+  const face = new THREE.Mesh(fgeo, skin); face.scale.set(0.85, 1.05, 0.9); head.add(face);
   for (const [x, y, r] of [[-0.06, 0.05, 0.035], [0.06, 0.05, 0.035], [-0.03, 0.12, 0.018], [0.03, 0.12, 0.018], [-0.1, 0.11, 0.015], [0.1, 0.11, 0.015]]) {
     const e = new THREE.Mesh(new THREE.SphereGeometry(r, 6, 6), voidMat); e.position.set(x, y, 0.13); head.add(e);
     const gl = new THREE.Mesh(new THREE.SphereGeometry(r * 0.25, 4, 4), new THREE.MeshBasicMaterial({ color: 0xffeedd, fog: false })); gl.position.set(x, y, 0.13 + r * 0.9); head.add(gl);
@@ -1146,7 +1429,12 @@ function makeBoss() {
   add(new THREE.SphereGeometry(0.035, 6, 5), rust, 0, 2.27, 0.42);
   const head = new THREE.Group(); head.position.set(0, 2.32, 0.6); body.add(head);
   const spin = new THREE.Group(); head.add(spin);
-  add(new THREE.SphereGeometry(0.2, 22, 16), porc, 0, 0.02, 0, spin).scale.set(0.85, 1.15, 1.05);
+  const skull = sculpt(new THREE.SphereGeometry(0.2, 40, 30), v => {          // 해골: 깊은 눈구멍, 꺼진 관자놀이, 튀어나온 광대와 눈썹뼈
+    for (const sx of [-1, 1]) { dent(v, sx * 0.068, 0.05, 0.17, 0.075, -0.2); dent(v, sx * 0.17, 0.06, 0.04, 0.07, -0.08); dent(v, sx * 0.11, -0.04, 0.13, 0.045, 0.07); dent(v, sx * 0.1, -0.1, 0.12, 0.06, -0.1); }
+    dent(v, 0, 0.11, 0.16, 0.08, 0.05); if (v.y < -0.05) v.x *= 1 - Math.min(1, (-0.05 - v.y) / 0.15) * 0.3;
+    v.multiplyScalar(1 + Math.sin(v.x * 40 + v.y * 25) * 0.006);
+  });
+  add(skull, porc, 0, 0.02, 0, spin).scale.set(0.85, 1.15, 1.05);
   // 앞: 깊은 눈구멍과 바늘 같은 빛
   const pin = new THREE.MeshBasicMaterial({ color: 0xfff2e0, fog: false });
   for (const sx of [-1, 1]) {
@@ -1198,7 +1486,7 @@ const MTYPES = {
   },
   // 눈 없는 것: 보지 못하지만 아주 작은 소리도 듣는다. 혀를 차며 소리를 더듬는다
   listener: {
-    model: { skin: 0x6f6a66, joint: 0x3a3330, hair: false, eyes: false, gown: false, mouth: [0.55, 2.6, 0.5], teeth: true, headY: 1.45, armLen: 1.05, scale: 1.08 },
+    model: { skin: 0x6f6a66, joint: 0x3a3330, hair: false, eyes: false, gown: false, mouth: [0.55, 2.6, 0.5], teeth: true, headY: 1.5, armLen: 1.05, scale: 1.08, ridges: true, ribs: 0.16, spine: 0.025, fingers: 0.32 },
     see: false, hear: { run: 19, walk: 7.5, sneak: 1.9, still: 0 },
     speed: { wander: 1.4, search: 2.3, chase: 4.25 }, lean: 0.75,
     voice: { f: 34, lp: 160, bp: 300, q: 3, growl: 0.42, vib: 3 }
@@ -1336,6 +1624,151 @@ const propBuilders = {
     for (let i = 0; i < 6; i++) mk(new THREE.SphereGeometry(rand(0.02, 0.04), 6, 4), P.stuffing, rand(-0.06, 0.06), rand(0.08, 0.2), 0.1, bear); // 터진 솜
   }
 };
+/* ---------- 데칼: 매번 다른 핏자국과 흔적 ---------- */
+const BLOOD = ['88,4,4', '70,3,3', '100,8,6', '58,2,2'];
+function blob(g, cx, cy, R, n = 20, j = 0.45) { g.beginPath(); for (let k = 0; k < n; k++) { const a = (k / n) * Math.PI * 2, r = R * (1 - j / 2 + Math.random() * j); g[k ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * r, cy + Math.sin(a) * r); } g.closePath(); }
+const DECAL_DRAW = {
+  hand(g, s) {          // 미끄러져 내린 피 묻은 손자국들
+    for (let h = 0; h < (rand(1, 4) | 0); h++) {
+      const x = rand(s * .25, s * .75), y = rand(s * .2, s * .55), sc = rand(0.8, 1.15), rot = rand(-0.5, 0.5), c = BLOOD[h % 4];
+      g.save(); g.translate(x, y); g.rotate(rot); g.scale(sc * (Math.random() < .5 ? -1 : 1), sc);
+      g.fillStyle = `rgba(${c},.9)`; g.beginPath(); g.ellipse(0, 0, 20, 24, 0, 0, Math.PI * 2); g.fill();
+      [[-20, -30, 0.35, 18], [-8, -40, 0.1, 24], [6, -42, -0.05, 26], [19, -36, -0.2, 22], [27, -5, -1.1, 15]].forEach(([fx, fy, a, L]) => { g.save(); g.translate(fx, fy); g.rotate(a); g.beginPath(); g.ellipse(0, 0, 5.5, L / 2 + 4, 0, 0, Math.PI * 2); g.fill(); g.restore(); });
+      for (let k = 0; k < 5; k++) { const sx = rand(-18, 18), len = rand(30, 140), gr = g.createLinearGradient(0, 10, 0, 10 + len); gr.addColorStop(0, `rgba(${c},.75)`); gr.addColorStop(1, `rgba(${c},0)`); g.fillStyle = gr; g.fillRect(sx, 10, rand(3, 9), len); }
+      g.restore();
+    }
+  },
+  splat(g, s) {         // 튄 피: 가운데 덩어리, 뻗어 나간 가시, 흩뿌린 방울, 흘러내림
+    const c = BLOOD[(Math.random() * 4) | 0], cx = s / 2 + rand(-20, 20), cy = s * .45;
+    g.fillStyle = `rgba(${c},.92)`; blob(g, cx, cy, rand(22, 40), 24, 0.6); g.fill();
+    for (let k = 0; k < rand(10, 22); k++) { const a = rand(0, 6.3), L = rand(30, 110), w = rand(3, 8); g.beginPath(); g.moveTo(cx + Math.cos(a + 1.57) * w, cy + Math.sin(a + 1.57) * w); g.lineTo(cx + Math.cos(a) * L, cy + Math.sin(a) * L); g.lineTo(cx + Math.cos(a - 1.57) * w, cy + Math.sin(a - 1.57) * w); g.fill(); g.beginPath(); g.arc(cx + Math.cos(a) * L, cy + Math.sin(a) * L, w * 0.7, 0, 7); g.fill(); }
+    for (let k = 0; k < 60; k++) { const a = rand(0, 6.3), d = rand(40, 125); g.beginPath(); g.arc(cx + Math.cos(a) * d, cy + Math.sin(a) * d, rand(1, 4.5), 0, 7); g.fill(); }
+    drips(g, s, 7, c, cy);
+  },
+  smear(g, s) {         // 벽을 따라 끌린 핏자국
+    const c = BLOOD[(Math.random() * 4) | 0], y0 = s * .5 + rand(-30, 30);
+    for (let k = 0; k < 14; k++) { g.strokeStyle = `rgba(${c},${rand(.25, .7)})`; g.lineWidth = rand(2, 12); g.lineCap = 'round'; const o = rand(-28, 28); g.beginPath(); g.moveTo(10, y0 + o); g.bezierCurveTo(s * .35, y0 + o + rand(-30, 30), s * .65, y0 + o + rand(-30, 30), rand(s * .6, s - 10), y0 + o + rand(-40, 40)); g.stroke(); }
+    drips(g, s, 9, c, y0);
+  },
+  scratch(g, s) {       // 무언가가 할퀸 깊은 자국 (네 줄)
+    const n = (rand(1, 3) | 0);
+    for (let m = 0; m < n; m++) {
+      const x0 = rand(s * .2, s * .6), y0 = rand(s * .1, s * .4), a = rand(-0.4, 0.4), L = rand(s * .35, s * .7);
+      for (let k = 0; k < 4; k++) {
+        const ox = x0 + k * 16, pts = []; for (let t = 0; t <= 10; t++) pts.push([ox + Math.sin(a) * L * t / 10 + rand(-2, 2), y0 + Math.cos(a) * L * t / 10]);
+        g.lineCap = 'round';
+        g.strokeStyle = 'rgba(205,195,170,.35)'; g.lineWidth = 7; g.beginPath(); pts.forEach(([x, y], i) => g[i ? 'lineTo' : 'moveTo'](x + 1.5, y)); g.stroke();
+        g.strokeStyle = 'rgba(12,8,6,.9)'; g.lineWidth = 3.5; g.beginPath(); pts.forEach(([x, y], i) => g[i ? 'lineTo' : 'moveTo'](x, y)); g.stroke();
+      }
+    }
+  },
+  words(g, s) {         // 피로 쓴 글씨
+    const txt = ['살려줘', '여기 있어', '보지 마', '나가', '7', '몇 번째지', '엄마', '숨어', '또 왔어', '깨우지 마'][(Math.random() * 10) | 0], c = BLOOD[(Math.random() * 4) | 0];
+    g.font = `bold ${rand(56, 84) | 0}px serif`; g.textBaseline = 'middle'; g.fillStyle = `rgba(${c},.9)`;
+    const w = g.measureText(txt).width; let x = s / 2 - w / 2;
+    for (const ch of txt) { g.save(); g.translate(x, s / 2 + rand(-6, 6)); g.rotate(rand(-0.15, 0.15)); g.fillText(ch, 0, 0); g.restore(); x += g.measureText(ch).width + rand(-2, 4); }
+    drips(g, s, 12, c, s / 2 + 18);
+  },
+  tally(g, s) {         // 날짜를 센 듯한 긁힌 눈금
+    g.strokeStyle = 'rgba(14,10,8,.85)'; g.lineWidth = 3; g.lineCap = 'round';
+    let x = 20, y = 30; const n = rand(12, 38) | 0;
+    for (let i = 0; i < n; i++) {
+      if (i % 5 === 4) { g.beginPath(); g.moveTo(x - 4 * 13 - 4, y + 34); g.lineTo(x + 2, y + 6); g.stroke(); x += 18; }
+      else { g.beginPath(); g.moveTo(x + rand(-2, 2), y); g.lineTo(x + rand(-3, 3), y + 42); g.stroke(); x += 13; }
+      if (x > s - 30) { x = 20; y += 60; }
+    }
+  },
+  hole(g, s) {          // 벽이 부서져 벽돌과 어둠이 드러난 구멍
+    const cx = s / 2, cy = s / 2, R = s * .4;
+    g.save(); blob(g, cx, cy, R, 26, 0.5); g.clip();
+    g.fillStyle = '#5c574c'; g.fillRect(0, 0, s, s); speckle(g, s, .2, 3000);
+    g.save(); blob(g, cx, cy, R * .78, 22, 0.5); g.clip();
+    for (let r = 0, y = 0; y < s; r++, y += 16) for (let x = -(r % 2) * 20; x < s; x += 40) { const c = rand(50, 80); g.fillStyle = `rgb(${c + 20 | 0},${c * .6 | 0},${c * .45 | 0})`; g.fillRect(x + 2, y + 2, 36, 12); }
+    const gr = g.createRadialGradient(cx, cy, 0, cx, cy, R * .78); gr.addColorStop(0, 'rgba(0,0,0,.97)'); gr.addColorStop(0.55, 'rgba(0,0,0,.8)'); gr.addColorStop(1, 'rgba(0,0,0,.25)');
+    g.fillStyle = gr; g.fillRect(0, 0, s, s); g.restore(); g.restore();
+    g.strokeStyle = 'rgba(10,8,6,.8)'; g.lineWidth = 2; blob(g, cx, cy, R, 26, 0.5); g.stroke();
+    crackLines(g, s, 6, 'rgba(10,8,6,.6)', 1.5, 6, 30);
+  },
+  mold(g, s) {          // 번진 곰팡이
+    for (let k = 0; k < 40; k++) { const x = s / 2 + rand(-80, 80), y = s / 2 + rand(-80, 80), r = rand(8, 40), gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(${rand(10, 30) | 0},${rand(25, 45) | 0},${rand(10, 25) | 0},.7)`); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); }
+    for (let k = 0; k < 400; k++) { g.fillStyle = 'rgba(5,10,4,.5)'; g.fillRect(s / 2 + rand(-100, 100), s / 2 + rand(-100, 100), 1.5, 1.5); }
+  },
+  soot(g, s) {          // 불에 그을린 자국 (위로 번진다)
+    for (let k = 0; k < 30; k++) { const x = s / 2 + rand(-50, 50) * (1 - k / 40), y = s * .85 - k * 7, r = rand(30, 70), gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(5,4,3,.35)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); }
+  },
+  pool(g, s) {          // 바닥의 피 웅덩이
+    const c = BLOOD[(Math.random() * 4) | 0];
+    g.fillStyle = `rgba(${c},.95)`; blob(g, s / 2, s / 2, s * .32, 30, 0.5); g.fill();
+    for (let k = 0; k < 4; k++) { blob(g, s / 2 + rand(-80, 80), s / 2 + rand(-80, 80), rand(15, 40), 16, 0.6); g.fill(); }
+    for (let k = 0; k < 40; k++) { g.beginPath(); g.arc(s / 2 + rand(-120, 120), s / 2 + rand(-120, 120), rand(1, 4), 0, 7); g.fill(); }
+    g.fillStyle = 'rgba(30,0,0,.6)'; blob(g, s / 2, s / 2, s * .22, 20, 0.4); g.fill();
+  },
+  drag(g, s) {          // 무언가를 끌고 간 자국
+    const c = BLOOD[(Math.random() * 4) | 0]; g.lineCap = 'round';
+    for (let k = 0; k < 5; k++) { g.strokeStyle = `rgba(${c},${rand(.4, .85)})`; g.lineWidth = rand(6, 22); g.beginPath(); g.moveTo(s * .5 + rand(-20, 20), 0); g.bezierCurveTo(s * .5 + rand(-50, 50), s * .35, s * .5 + rand(-50, 50), s * .65, s * .5 + rand(-25, 25), s); g.stroke(); }
+    for (let i = 0; i < 26; i++) { g.fillStyle = `rgba(${c},.8)`; g.beginPath(); g.arc(s * .5 + rand(-70, 70), rand(0, s), rand(2, 8), 0, 7); g.fill(); }
+  },
+  foot(g, s) {          // 맨발 발자국 (점점 흐려진다)
+    const c = BLOOD[(Math.random() * 4) | 0];
+    for (let i = 0; i < 7; i++) {
+      const x = s / 2 + (i % 2 ? 22 : -22) + rand(-4, 4), y = s - 30 - i * 34, a = 1 - i / 8;
+      g.save(); g.translate(x, y); g.rotate(rand(-0.15, 0.15)); g.fillStyle = `rgba(${c},${0.9 * a})`;
+      g.beginPath(); g.ellipse(0, 0, 7, 13, 0, 0, Math.PI * 2); g.fill(); g.beginPath(); g.ellipse(0, 12, 6, 6, 0, 0, Math.PI * 2); g.fill();
+      for (let t = 0; t < 5; t++) { g.beginPath(); g.arc(-7 + t * 3.5, -16 - (t === 0 ? 2 : 0), 2.2 - t * 0.2, 0, 7); g.fill(); }
+      g.restore();
+    }
+  }
+};
+const DECAL_TYPES = Object.keys(DECAL_DRAW);
+const decalMats = Object.fromEntries(DECAL_TYPES.map(t => [t, [0, 1, 2].map(() => {
+  const tex = canvasTex(256, (g, s) => { g.clearRect(0, 0, s, s); DECAL_DRAW[t](g, s); });
+  return new THREE.MeshStandardMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, roughness: ['scratch', 'tally', 'hole', 'mold', 'soot'].includes(t) ? 0.95 : 0.22 });
+})]));
+// 놀이방 벽에 테이프로 붙은 아이 그림
+const drawingMats = [0, 1, 2, 3].map(v => new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide, map: canvasTex(128, (g, s) => {
+  g.fillStyle = '#d8d0bc'; g.fillRect(0, 0, s, s); stains(g, s, 4, 'rgba(120,90,40,.35)', .4);
+  g.lineWidth = 2.5; g.lineCap = 'round';
+  const stick = (x, y, k, col) => { g.strokeStyle = col; g.beginPath(); g.arc(x, y - 30 * k, 6 * k, 0, 7); g.moveTo(x, y - 24 * k); g.lineTo(x, y - 8 * k); g.lineTo(x - 6 * k, y); g.moveTo(x, y - 8 * k); g.lineTo(x + 6 * k, y); g.moveTo(x - 8 * k, y - 18 * k); g.lineTo(x + 8 * k, y - 18 * k); g.stroke(); };
+  if (v === 0) { g.strokeStyle = '#c08020'; g.beginPath(); g.arc(100, 22, 12, 0, 7); g.stroke(); stick(35, 110, 1.2, '#a83228'); stick(60, 112, 1, '#2a4a8a'); stick(80, 114, 0.7, '#3a6a2a'); }
+  else if (v === 1) { stick(40, 112, 1, '#2a4a8a'); g.strokeStyle = '#0a0a0a'; g.lineWidth = 4; g.beginPath(); g.arc(95, 26, 7, 0, 7); g.moveTo(95, 33); g.lineTo(95, 95); g.lineTo(88, 120); g.moveTo(95, 95); g.lineTo(102, 120); g.moveTo(95, 45); g.lineTo(55, 100); g.moveTo(95, 45); g.lineTo(125, 95); g.stroke(); }
+  else if (v === 2) { g.fillStyle = '#0a0a0a'; for (let i = 0; i < 30; i++) { g.fillRect(rand(20, 108), rand(20, 108), rand(3, 10), rand(3, 10)); } g.fillStyle = '#a83228'; g.font = 'bold 18px sans-serif'; g.fillText('보고있어', 26, 120); }
+  else { g.strokeStyle = '#2a4a8a'; g.strokeRect(25, 50, 70, 60); g.beginPath(); g.moveTo(20, 52); g.lineTo(60, 20); g.lineTo(100, 52); g.stroke(); g.fillStyle = '#111'; g.fillRect(70, 62, 14, 14); g.fillStyle = '#e8e0d0'; g.fillRect(74, 66, 2, 2); g.fillRect(79, 66, 2, 2); } // 창문 속의 눈
+  g.fillStyle = 'rgba(200,190,150,.6)'; g.fillRect(4, 2, 26, 9); g.fillRect(s - 30, 2, 26, 9);       // 테이프
+}) }));
+
+const W = {
+  extinguisher(g) {     // 유리 깨진 소화기함
+    mk(new THREE.BoxGeometry(0.42, 0.62, 0.16), new THREE.MeshStandardMaterial({ color: 0x7a1410, roughness: 0.5, metalness: 0.3 }), 0, 0, 0.08, g);
+    mk(new THREE.BoxGeometry(0.34, 0.54, 0.02), P.black, 0, 0, 0.165, g);
+    mk(new THREE.CylinderGeometry(0.07, 0.07, 0.4, 12), new THREE.MeshStandardMaterial({ color: 0x9a1a14, roughness: 0.35, metalness: 0.2 }), 0, -0.04, 0.09, g);
+  },
+  clock(g) {            // 3시 33분에 멈춘 시계
+    const face = mk(new THREE.CylinderGeometry(0.2, 0.2, 0.05, 24), new THREE.MeshStandardMaterial({ color: 0x2a2a28, metalness: 0.5 }), 0, 0, 0.025, g); face.rotation.x = Math.PI / 2;
+    const m = new THREE.Mesh(new THREE.CircleGeometry(0.18, 24), new THREE.MeshStandardMaterial({ roughness: 0.4, map: canvasTex(128, (c, s) => {
+      c.fillStyle = '#cfc8b4'; c.fillRect(0, 0, s, s); stains(c, s, 6, 'rgba(90,70,30,.4)', .3); c.fillStyle = '#1a1a1a'; c.font = 'bold 14px serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      for (let i = 1; i <= 12; i++) { const a = i / 12 * Math.PI * 2 - Math.PI / 2; c.fillText(i, 64 + Math.cos(a) * 50, 64 + Math.sin(a) * 50); }
+      c.strokeStyle = '#111'; c.lineWidth = 4; c.beginPath(); c.moveTo(64, 64); c.lineTo(64 + Math.cos(0.47 * Math.PI * 2 - Math.PI / 2 - 1.3) * 28, 64 + Math.sin(-Math.PI / 2 + 1.6) * 28); c.stroke();
+      c.lineWidth = 2.5; c.beginPath(); c.moveTo(64, 64); c.lineTo(64 + Math.cos(33 / 60 * Math.PI * 2 - Math.PI / 2) * 42, 64 + Math.sin(33 / 60 * Math.PI * 2 - Math.PI / 2) * 42); c.stroke();
+      crackLines(c, s, 4, 'rgba(255,255,255,.5)', 1, 5, 30);
+    }) }));
+    m.position.z = 0.052; g.add(m);
+  },
+  notice(g) {           // 코르크 게시판과 빛바랜 공지들
+    mk(new THREE.BoxGeometry(0.9, 0.6, 0.03), new THREE.MeshStandardMaterial({ color: 0x6a4a2a, roughness: 1 }), 0, 0, 0.015, g);
+    for (let i = 0; i < 6; i++) { const pp = mk(new THREE.PlaneGeometry(rand(0.14, 0.24), rand(0.18, 0.28)), P.paper, rand(-0.3, 0.3), rand(-0.15, 0.15), 0.032 + i * 0.002, g); pp.rotation.z = rand(-0.25, 0.25); }
+  },
+  panel(g) {            // 배전함과 위로 이어진 배관
+    mk(new THREE.BoxGeometry(0.5, 0.7, 0.18), P.metal, 0, 0, 0.09, g);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.17), new THREE.MeshStandardMaterial({ map: canvasTex(64, (c, s) => { c.fillStyle = '#c8a020'; c.beginPath(); c.moveTo(32, 4); c.lineTo(60, 58); c.lineTo(4, 58); c.fill(); c.fillStyle = '#111'; c.font = 'bold 34px sans-serif'; c.textAlign = 'center'; c.fillText('!', 32, 52); }), transparent: true }));
+    sign.position.set(0, 0.12, 0.185); g.add(sign);
+    mk(new THREE.CylinderGeometry(0.03, 0.03, 1.5, 8), P.pipe, 0.15, 1.1, 0.06, g);
+  },
+  vent(g) {             // 녹슨 환풍구 (안쪽은 어둡다)
+    mk(new THREE.BoxGeometry(0.5, 0.32, 0.04), P.frame, 0, 0, 0.02, g);
+    mk(new THREE.BoxGeometry(0.44, 0.26, 0.02), P.black, 0, 0, 0.035, g);
+    for (let i = 0; i < 6; i++) { const sl = mk(new THREE.BoxGeometry(0.44, 0.012, 0.04), P.metal, 0, -0.11 + i * 0.044, 0.05, g); sl.rotation.x = 0.6; }
+  }
+};
 let props = [];   // 플레이어 충돌용 상자
 const propHit = (x, z, r) => props.some(b => x + r > b.min.x && x - r < b.max.x && z + r > b.min.z && z - r < b.max.z);
 
@@ -1396,11 +1829,61 @@ function decorate(cells) {
     dummy.rotation.set(rand(0, 3), rand(0, 3), rand(0, 3)); dummy.scale.setScalar(rand(0.02, 0.08)); dummy.updateMatrix(); rubble.setMatrixAt(i, dummy.matrix);
   }
   papers.receiveShadow = rubble.receiveShadow = rubble.castShadow = true; world.add(papers, rubble);
-  // 바닥에 끌린 핏자국
-  for (const t of shuffle(open.slice()).slice(0, 9)) {
+  // 벽면 목록 (열린 칸 + 맞닿은 벽 방향)
+  const faces = [];
+  for (let z = 1; z < GH - 1; z++) for (let x = 1; x < GW - 1; x++) if (!isWallTile(x, z))
+    for (const [dx, dz] of DIRS) if (isWallTile(x + dx, z + dz) && !(x + dx === exitTile.x && z + dz === exitTile.z)) faces.push({ x, z, dx, dz, zone: zoneAt(x, z) });
+  const facePos = (f, off, along, y) => { const c = tileCenter(f.x, f.z); return new THREE.Vector3(c.x + f.dx * (TILE / 2 - off) + (f.dz ? along : 0), y, c.z + f.dz * (TILE / 2 - off) + (f.dx ? along : 0)); };
+  // 걸레받이 (모든 벽), 병동 손잡이 난간, 놀이방 징두리 몰딩, 기계실 세로 배관
+  { const base = new THREE.InstancedMesh(new THREE.BoxGeometry(TILE, 0.13, 0.03), P.frame, faces.length);
+    const railF = faces.filter(f => f.zone === 0 && Math.random() < 0.85), rail = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.025, 0.025, TILE, 8), P.metal, railF.length);
+    const brk = new THREE.InstancedMesh(new THREE.BoxGeometry(0.03, 0.03, 0.08), P.metal, railF.length);
+    const trimF = faces.filter(f => f.zone === 1), trim = new THREE.InstancedMesh(new THREE.BoxGeometry(TILE, 0.05, 0.035), P.wood, trimF.length);
+    const vpF = faces.filter(f => f.zone === 2 && Math.random() < 0.3), vp = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.05, 0.05, WALL_H, 10), P.pipe, vpF.length);
+    faces.forEach((f, i) => { dummy.position.copy(facePos(f, 0.015, 0, 0.065)); dummy.rotation.set(0, f.dx ? Math.PI / 2 : 0, 0); dummy.scale.setScalar(1); dummy.updateMatrix(); base.setMatrixAt(i, dummy.matrix); });
+    railF.forEach((f, i) => {
+      dummy.position.copy(facePos(f, 0.075, 0, 0.92)); dummy.rotation.set(f.dx ? Math.PI / 2 : 0, 0, f.dx ? 0 : Math.PI / 2); dummy.updateMatrix(); rail.setMatrixAt(i, dummy.matrix);
+      dummy.position.copy(facePos(f, 0.04, 0, 0.92)); dummy.rotation.set(0, f.dx ? Math.PI / 2 : 0, 0); dummy.updateMatrix(); brk.setMatrixAt(i, dummy.matrix);
+    });
+    trimF.forEach((f, i) => { dummy.position.copy(facePos(f, 0.017, 0, 1.2)); dummy.rotation.set(0, f.dx ? Math.PI / 2 : 0, 0); dummy.updateMatrix(); trim.setMatrixAt(i, dummy.matrix); });
+    vpF.forEach((f, i) => { dummy.position.copy(facePos(f, 0.12, rand(-0.9, 0.9), WALL_H / 2)); dummy.rotation.set(0, 0, 0); dummy.updateMatrix(); vp.setMatrixAt(i, dummy.matrix); });
+    [base, rail, brk, trim, vp].forEach(m => { m.castShadow = m.receiveShadow = true; world.add(m); });
+  }
+  // 벽 부착물
+  const mountKinds = [['extinguisher', 'clock', 'notice', 'vent'], ['clock', 'vent'], ['panel', 'extinguisher', 'vent'], ['vent']];
+  for (const f of shuffle(faces.slice()).slice(0, 26)) {
+    const kinds = mountKinds[f.zone], kind = kinds[(Math.random() * kinds.length) | 0], g = new THREE.Group();
+    g.position.copy(facePos(f, 0, rand(-0.7, 0.7), kind === 'vent' ? rand(0.35, 2.5) : kind === 'clock' ? 2.2 : kind === 'panel' ? 1.4 : 1.35));
+    g.rotation.y = Math.atan2(-f.dx, -f.dz); W[kind](g); world.add(g);
+  }
+  // 벽 데칼: 구역마다 어울리는 흔적이 무작위 크기·각도로
+  const zoneDecals = [['hand', 'hand', 'splat', 'smear', 'words', 'scratch', 'tally', 'hole'], ['hand', 'scratch', 'words', 'smear', 'splat', 'mold'], ['soot', 'smear', 'splat', 'scratch', 'hole', 'hand', 'words'], ['mold', 'mold', 'soot', 'hole', 'hand', 'scratch', 'splat']];
+  const SZ = { hand: 0.95, splat: 1.3, smear: 1.7, scratch: 1.0, words: 1.5, tally: 0.75, hole: 1.1, mold: 1.6, soot: 1.9 };
+  const HY = { hand: [0.8, 1.8], splat: [0.5, 2.2], smear: [0.5, 1.5], scratch: [0.7, 1.9], words: [1.2, 2.1], tally: [0.6, 1.6], hole: [0.5, 2.2], mold: [0.4, 2.5], soot: [1.0, 2.0] };
+  let di = 0;
+  const wallDecal = (f, type) => {
+    const k = SZ[type] * rand(0.7, 1.3), m = new THREE.Mesh(new THREE.PlaneGeometry(k, k), decalMats[type][(Math.random() * 3) | 0]);
+    m.position.copy(facePos(f, 0.012 + (di++ % 12) * 0.0012, rand(-0.85, 0.85), rand(...HY[type])));
+    m.rotation.set(0, Math.atan2(-f.dx, -f.dz), ['hand', 'splat', 'mold', 'hole'].includes(type) ? rand(-1, 1) : rand(-0.15, 0.15));
+    if (Math.random() < 0.5) m.scale.x = -1;
+    m.receiveShadow = true; world.add(m);
+  };
+  for (const f of shuffle(faces.slice()).slice(0, 70)) { const L = zoneDecals[f.zone]; wallDecal(f, L[(Math.random() * L.length) | 0]); }
+  // 눈을 뜬 방의 벽: 누군가 날짜를 세던 눈금
+  { const f = { x: 1, z: 1, dx: -1, dz: 0 }; wallDecal(f, 'tally'); wallDecal({ x: 1, z: 2, dx: -1, dz: 0 }, 'scratch'); }
+  // 놀이방 벽의 아이 그림
+  for (const f of shuffle(faces.filter(f => f.zone === 1)).slice(0, 14)) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.3), drawingMats[(Math.random() * 4) | 0]);
+    m.position.copy(facePos(f, 0.01, rand(-0.9, 0.9), rand(0.7, 1.5))); m.rotation.set(0, Math.atan2(-f.dx, -f.dz), rand(-0.2, 0.2)); world.add(m);
+  }
+  // 바닥 데칼: 피 웅덩이, 끌린 자국, 발자국
+  for (const t of shuffle(open.slice()).slice(0, 26)) {
     const c = tileCenter(t.x, t.z), along = !isWallTile(t.x - 1, t.z) && !isWallTile(t.x + 1, t.z);
-    const b = new THREE.Mesh(new THREE.PlaneGeometry(0.9, TILE * 1.1), P.blood);
-    b.rotation.set(-Math.PI / 2, 0, (along ? Math.PI / 2 : 0) + rand(-0.2, 0.2)); b.position.set(c.x + rand(-0.3, 0.3), 0.006, c.z + rand(-0.3, 0.3)); b.receiveShadow = true; world.add(b);
+    const type = ['pool', 'drag', 'drag', 'foot', 'foot', 'pool'][(Math.random() * 6) | 0];
+    const [w, h] = type === 'pool' ? [1.3, 1.3] : type === 'drag' ? [0.9, TILE * 1.1] : [0.6, TILE * 0.9];
+    const k = rand(0.75, 1.2), m = new THREE.Mesh(new THREE.PlaneGeometry(w * k, h * k), decalMats[type][(Math.random() * 3) | 0]);
+    m.rotation.set(-Math.PI / 2, 0, (type === 'pool' ? rand(0, 6.3) : (along ? Math.PI / 2 : 0) + (Math.random() < .5 ? Math.PI : 0) + rand(-0.2, 0.2)));
+    m.position.set(c.x + rand(-0.3, 0.3), 0.004 + (di++ % 10) * 0.0008, c.z + rand(-0.3, 0.3)); m.receiveShadow = true; world.add(m);
   }
   // 가구와 장난감: 벽에 붙여 놓는다 (복도 가운데는 비워 둔다)
   props = [];
@@ -1440,21 +1923,34 @@ function buildWorld() {
   // 바닥/천장
   const size = (GW + 2) * TILE;
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), floorMat);
-  floor.rotation.x = -Math.PI / 2; floor.position.set(GW * TILE / 2, 0, GH * TILE / 2); floor.receiveShadow = true; world.add(floor);
+  floor.rotation.x = -Math.PI / 2; floor.position.set(GW * TILE / 2, -0.002, GH * TILE / 2); floor.receiveShadow = true; world.add(floor);
+  // 구역별 바닥 (칸마다)
+  assignZones();
+  { const lists = zoneFloorMats.map(v => v.map(() => [])), dmy = new THREE.Object3D();
+    for (let z = 0; z < GH; z++) for (let x = 0; x < GW; x++) if (!isWallTile(x, z) || (x === exitTile.x && z === exitTile.z)) lists[zoneAt(x, z)][(x * 3 + z * 5) % 2].push([x, z]);
+    const fg = new THREE.PlaneGeometry(TILE, TILE);
+    lists.forEach((vl, zi) => vl.forEach((list, vi) => {
+      if (!list.length) return;
+      const im = new THREE.InstancedMesh(fg, zoneFloorMats[zi][vi], list.length);
+      list.forEach(([x, z], i) => { dmy.position.set(x * TILE + TILE / 2, 0, z * TILE + TILE / 2); dmy.rotation.set(-Math.PI / 2, 0, ((x * 5 + z * 3) % 4) * Math.PI / 2); dmy.updateMatrix(); im.setMatrixAt(i, dmy.matrix); });
+      im.receiveShadow = true; world.add(im);
+    }));
+  }
   const ceil = new THREE.Mesh(new THREE.PlaneGeometry(size, size), ceilMat);
   ceil.rotation.x = Math.PI / 2; ceil.position.set(GW * TILE / 2, WALL_H, GH * TILE / 2); ceil.receiveShadow = true; world.add(ceil);
 
   // 벽 (인스턴싱)
-  const normal = [], bloody = [];
+  const wallLists = zoneWallMats.map(v => v.map(() => []));
   for (let z = 0; z < GH; z++) for (let x = 0; x < GW; x++) {
     if (!grid[z][x] || (x === exitTile.x && z === exitTile.z)) continue;
     let near = false;
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) if (!isWallTile(x + dx, z + dz)) near = true;
-    if (near) (Math.random() < 0.08 ? bloody : normal).push([x, z]);
+    if (near) wallLists[zoneAt(x, z)][(Math.random() * 3) | 0].push([x, z]);
   }
   const wallGeo = new THREE.BoxGeometry(TILE, WALL_H, TILE);
   const dummy = new THREE.Object3D();
-  for (const [list, mat] of [[normal, wallMat], [bloody, bloodWallMat]]) {
+  for (const [list, mat] of wallLists.flatMap((vl, zi) => vl.map((l, vi) => [l, zoneWallMats[zi][vi]]))) {
+    if (!list.length) continue;
     const im = new THREE.InstancedMesh(wallGeo, mat, list.length);
     list.forEach(([x, z], i) => { dummy.position.set(x * TILE + TILE / 2, WALL_H / 2, z * TILE + TILE / 2); dummy.rotation.y = ((x * 7 + z * 13) % 4) * Math.PI / 2; dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix); });
     im.castShadow = im.receiveShadow = true; world.add(im);
