@@ -1761,6 +1761,60 @@ const MODEL_SPEC = {   // head: 머리를 따로 떼어 돌릴 수 있게 (cut =
   robot: { tile: 0.4, rough: 0.5, metal: 0.35, head: { cut: 0.55, r: 0.38 }, eyes: true },
   mass: { tile: 0.5, rough: 0.28, face: [0.35, 0.75] }
 };
+// 자동 리깅용 관절 위치 (모델 좌표, m). L = -x 쪽, R = +x 쪽. R을 생략하면 L을 좌우 대칭
+const JOINTS = {
+  stalker: { pelvis: [0, 1.25, 0], waist: [0, 1.55, 0], neck: [0, 2.22, 0.01], headBase: [0, 2.3, 0.02], headTop: [0, 2.6, 0.02],
+    shL: [-0.19, 2.18, 0], elL: [-0.25, 1.78, 0.03], wrL: [-0.29, 1.38, 0.1], handL: [-0.3, 1.15, 0.14],
+    hipL: [-0.075, 1.22, 0], knL: [-0.07, 0.62, 0.02], anL: [-0.07, 0.1, 0], toeL: [-0.07, 0.02, 0.18] },
+  listener: { pelvis: [0, 1.44, 0.02], waist: [0, 1.7, 0.03], neck: [0, 2.2, 0.1], headBase: [0, 2.3, 0.15], headTop: [0, 2.62, 0],
+    shL: [-0.27, 2.1, 0.05], elL: [-0.38, 1.59, 0.08], wrL: [-0.43, 1.0, 0.12], handL: [-0.45, 0.5, 0.16],
+    hipL: [-0.08, 1.4, 0.02], knL: [-0.12, 0.94, 0.15], anL: [-0.13, 0.16, 0], toeL: [-0.14, 0.03, 0.15] },
+  watcher: { pelvis: [0, 1.42, 0], waist: [0, 1.62, 0], neck: [0, 2.03, 0.01], headBase: [0, 2.1, 0.02], headTop: [0, 2.45, 0.02],
+    shL: [-0.2, 2.0, 0], elL: [-0.29, 1.64, 0], wrL: [-0.43, 1.25, 0.02], handL: [-0.45, 1.02, 0.05],
+    hipL: [-0.13, 1.4, 0], knL: [-0.075, 0.81, 0], anL: [-0.07, 0.09, 0], toeL: [-0.07, 0.02, 0.15] },
+  robot: { pelvis: [0, 1.42, 0], waist: [0, 1.65, 0], neck: [0, 2.06, 0.02], headBase: [0, 2.12, 0.03], headTop: [0, 2.6, 0.03],
+    shL: [-0.29, 2.0, 0], elL: [-0.54, 1.51, 0.02], wrL: [-0.66, 1.26, 0.05], handL: [-0.7, 1.08, 0.08],
+    shR: [0.33, 2.0, 0], elR: [0.52, 1.65, 0.02], wrR: [0.66, 1.3, 0.05], handR: [0.7, 1.12, 0.08],
+    hipL: [-0.12, 1.38, 0], knL: [-0.21, 0.76, 0.02], anL: [-0.3, 0.2, 0], toeL: [-0.3, 0.05, 0.25],
+    hipR: [0.12, 1.38, 0], knR: [0.25, 0.84, 0.02], anR: [0.33, 0.2, 0], toeR: [0.33, 0.05, 0.2] },
+  boss: { pelvis: [-0.05, 1.22, -0.25], waist: [-0.05, 1.5, -0.22], neck: [0.15, 2.3, 0.05], headBase: [0.3, 2.4, 0.2], headTop: [0.39, 2.68, 0.3],
+    shL: [-0.32, 2.35, -0.1], elL: [-0.51, 1.65, 0.25], wrL: [-0.6, 1.05, 0.55], handL: [-0.62, 0.55, 0.65],
+    shR: [0.21, 2.32, -0.05], elR: [0.39, 1.56, 0.1], wrR: [0.56, 1.35, 0.25], handR: [0.62, 1.0, 0.35],
+    hipL: [-0.15, 1.15, -0.3], knL: [-0.1, 0.65, -0.55], anL: [-0.15, 0.24, -0.62], toeL: [-0.18, 0.03, -0.35],
+    hipR: [0.15, 1.15, -0.3], knR: [0.3, 0.68, -0.35], anR: [0.38, 0.26, -0.2], toeR: [0.4, 0.03, 0.05] }
+};
+// 뼈대를 만들고, 정점마다 가장 가까운 뼈(굵은 뼈일수록 넓게) 두세 개에 무게를 나눠 준다
+const BONE_DEF = [ // [이름, 부모, 관절, 무게 구간 시작, 끝, 굵기]
+  ['hips', null, 'pelvis', 'pelvis', 'waist', 0.2], ['spine', 'hips', 'waist', 'waist', 'neck', 0.2],
+  ['neck', 'spine', 'neck', 'neck', 'headBase', 0.07], ['head', 'neck', 'headBase', 'headBase', 'headTop', 0.15],
+  ['upL', 'spine', 'shL', 'shL', 'elL', 0.065], ['foL', 'upL', 'elL', 'elL', 'handL', 0.055],
+  ['upR', 'spine', 'shR', 'shR', 'elR', 0.065], ['foR', 'upR', 'elR', 'elR', 'handR', 0.055],
+  ['thL', 'hips', 'hipL', 'hipL', 'knL', 0.09], ['shinL', 'thL', 'knL', 'knL', 'toeL', 0.065],
+  ['thR', 'hips', 'hipR', 'hipR', 'knR', 0.09], ['shinR', 'thR', 'knR', 'knR', 'toeR', 0.065]
+];
+function rigModel(geo, Jsrc) {
+  const J = {};
+  for (const [k, v] of Object.entries(Jsrc)) J[k] = new THREE.Vector3(...v);
+  for (const k of ['sh', 'el', 'wr', 'hand', 'hip', 'kn', 'an', 'toe']) if (!J[k + 'R']) J[k + 'R'] = J[k + 'L'].clone().setX(-J[k + 'L'].x);
+  const bones = {}, list = [];
+  for (const [name, parent, joint] of BONE_DEF) {
+    const b = new THREE.Bone(); b.name = name; const pj = parent ? J[BONE_DEF.find(d => d[0] === parent)[2]] : new THREE.Vector3();
+    b.position.copy(J[joint]).sub(pj); if (parent) bones[parent].add(b); bones[name] = b; list.push(b);
+  }
+  if (geo.attributes.skinIndex) return { bones, list, J };   // 무게는 한 번만 계산 (형상 공유)
+  // 무게
+  const P = geo.attributes.position, n = P.count, si = new Uint16Array(n * 4), sw = new Float32Array(n * 4), v = new THREE.Vector3(), seg = new THREE.Line3(), q = new THREE.Vector3();
+  const segs = BONE_DEF.map(([, , , a, b, r]) => [new THREE.Line3(J[a], J[b]), r]);
+  const w = new Float32Array(BONE_DEF.length);
+  for (let i = 0; i < n; i++) {
+    v.fromBufferAttribute(P, i);
+    for (let b = 0; b < segs.length; b++) { segs[b][0].closestPointToPoint(v, true, q); const d = Math.max(0.004, q.distanceTo(v)) / segs[b][1]; w[b] = 1 / (d * d * d * d); }
+    const order = [...w.keys()].sort((a, b) => w[b] - w[a]).slice(0, 3); let sum = 0; order.forEach(b => sum += w[b]);
+    order.forEach((b, k) => { si[i * 4 + k] = b; sw[i * 4 + k] = w[b] / sum; });
+  }
+  geo.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4)); geo.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+  return { bones, list, J };
+}
 function skinCanvas(hex, bruise = 1) {
   return canvasTex(256, (c, s) => {
     c.fillStyle = hex; c.fillRect(0, 0, s, s); speckle(c, s, 0.1, 5000);
@@ -1856,8 +1910,14 @@ async function loadModels() {
       let hx = 0, hz = 0, hy = 0, cnt = 0; const pp = geo.attributes.position;
       for (let i = 0; i < pp.count; i++) if (pp.getY(i) > H - 0.12) { hx += pp.getX(i); hz += pp.getZ(i); cnt++; }
       hx /= cnt || 1; hz /= cnt || 1;
-      let headGeo = null, pivot = null, eyes = [];
-      if (spec.head) {
+      let headGeo = null, pivot = null, eyes = [], rig = null;
+      if (JOINTS[key]) {
+        rig = true;
+        if (spec.eyes) {   // 앞에서 광선을 쏴서 얼굴 표면을 찾아 붉은 눈을 박는다
+          const Jh = JOINTS[key].headBase, rc = new THREE.Raycaster(), fm = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+          for (const ex of [-0.07, 0.07]) { rc.set(new THREE.Vector3(ex, Jh[1] + 0.2, 3), new THREE.Vector3(0, 0, -1)); const hit = rc.intersectObject(fm)[0]; if (hit) eyes.push(hit.point.clone().add(new THREE.Vector3(0, 0, 0.012))); }
+        }
+      } else if (spec.head) {
         const cutY = H - spec.head.cut;
         [headGeo, geo] = splitTris(geo, (x, y, z) => y > cutY && Math.hypot(x - hx, z - hz) < spec.head.r);
         pivot = new THREE.Vector3(hx, cutY, hz); headGeo.translate(-hx, -cutY, -hz);
@@ -1869,7 +1929,7 @@ async function loadModels() {
       }
       geo.computeBoundingBox();
       // 잡힐 때 얼굴 앞면이 눈앞 약 0.6m에 오도록: faceZ = 몸 기준점에서 얼굴 앞면까지의 거리 - 0.1
-      MODELS[key] = { geo, headGeo, pivot, mat, H, eyes, faceY: ffy, faceZ: Math.max(0, ffz - 0.1), front: geo.boundingBox.max.z };
+      MODELS[key] = { geo, headGeo, pivot, mat, H, eyes, rig, faceY: ffy, faceZ: Math.max(0, ffz - 0.1), front: geo.boundingBox.max.z };
     } catch (e) { console.warn('모델을 불러오지 못했다:', key, e); }
   }
 }
@@ -1880,27 +1940,70 @@ function staticMonster(type, scale) {
   let root = g;
   if (type === 'crawler') { const flip = new THREE.Group(); flip.rotation.z = Math.PI; flip.position.y = WALL_H; g.add(flip); root = flip; }
   root.add(inner);
-  const mesh = new THREE.Mesh(M.geo, M.mat); mesh.castShadow = mesh.receiveShadow = true; mesh.userData.chunkable = true; inner.add(mesh);
-  const head = new THREE.Group(); inner.add(head);
-  const spin = new THREE.Group(); head.add(spin);
-  if (M.headGeo) { head.position.copy(M.pivot); const hm = new THREE.Mesh(M.headGeo, M.mat); hm.castShadow = true; spin.add(hm); }
+  let mesh, R = null;
+  if (M.rig) {   // 인스턴스마다 뼈대를 따로 만든다 (형상과 무게는 공유)
+    R = rigModel(M.geo, JOINTS[type]);
+    mesh = new THREE.SkinnedMesh(M.geo, M.mat); mesh.add(R.bones.hips); mesh.updateMatrixWorld(true); mesh.bind(new THREE.Skeleton(R.list));
+    mesh.frustumCulled = false;
+  } else if (type === 'crawler' || type === 'mass') {
+    const U = { uPhase: { value: 0 }, uAmp: { value: 0.3 }, uTime: { value: 0 } }, mat = M.mat.clone();
+    const code = type === 'crawler' ? `
+      float rr = length(transformed.xz), legW = smoothstep(0.3, 0.85, rr);
+      float sec = floor((atan(transformed.z, transformed.x) + 3.14159) / 6.28318 * 8.0);
+      float ph = uPhase + mod(sec, 2.0) * 3.14159;
+      transformed.y += max(0.0, sin(ph)) * legW * uAmp * 0.17;                 // 다리를 번갈아 들어 올리고
+      float sw = cos(ph) * legW * uAmp * 0.13;                                 // 앞뒤로 휘젓는다
+      transformed.xz = mat2(cos(sw), -sin(sw), sin(sw), cos(sw)) * transformed.xz;
+      transformed *= 1.0 + sin(uTime * 3.0) * 0.012 * (1.0 - legW);` : `
+      float rr = length(transformed.xz);
+      float w = sin(uTime * 2.1 + transformed.y * 7.0 + transformed.x * 5.0) * 0.024 + sin(uTime * 3.3 + transformed.z * 9.0 + transformed.y * 3.0) * 0.013;
+      transformed += objectNormal * w * uAmp;                                  // 살이 꿀렁꿀렁
+      float arm = smoothstep(0.7, 1.0, rr) * smoothstep(0.7, 0.0, transformed.y);
+      transformed.z += sin(uTime * 2.4 + transformed.x * 3.0) * 0.09 * arm * uAmp; // 삐져나온 팔들이 바닥을 긁는다
+      transformed.y += max(0.0, sin(uTime * 2.4 + transformed.x * 3.0 + 1.5)) * 0.05 * arm * uAmp;`;
+    mat.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, U);
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', 'uniform float uPhase, uAmp, uTime;\n#include <common>').replace('#include <begin_vertex>', '#include <begin_vertex>\n' + code);
+    };
+    mat.customProgramCacheKey = () => type + '-anim';
+    mesh = new THREE.Mesh(M.geo, mat); mesh.userData.animU = U; mesh.frustumCulled = false;
+  } else mesh = new THREE.Mesh(M.geo, M.mat);
+  mesh.castShadow = mesh.receiveShadow = true; mesh.userData.chunkable = true; inner.add(mesh);
+  const head = M.rig ? new THREE.Object3D() : new THREE.Group(); if (!M.rig) inner.add(head);
+  const spin = M.rig ? new THREE.Object3D() : new THREE.Group(); if (!M.rig) head.add(spin);
+  if (M.rig) { /* 머리는 뼈가 움직인다 */ }
+  else if (M.headGeo) { head.position.copy(M.pivot); const hm = new THREE.Mesh(M.headGeo, M.mat); hm.castShadow = true; spin.add(hm); }
   else head.position.set(0, M.faceY - (type === 'crawler' ? M.H * 0.4 : 0), M.front * 0.8);
   const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2010, fog: false });
-  M.eyes.forEach(e => { const em = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 8), eyeMat); em.position.copy(e); spin.add(em); });
+  M.eyes.forEach(e => { const em = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 8), eyeMat); if (R) { em.position.copy(e).sub(R.J.headBase); R.bones.head.add(em); } else { em.position.copy(e); spin.add(em); } });
   const dummy = () => new THREE.Group();
   const arms = [0, 1].map(() => { const sh = dummy(), fore = dummy(); sh.add(fore); inner.add(sh); return { sh, fore }; });
   const legs = [dummy(), dummy()], knees = [dummy(), dummy()]; legs.forEach((l, i) => { inner.add(l); l.add(knees[i]); });
   const hair = dummy(), jaw = dummy(), claw = dummy(), ext = dummy(); head.add(hair, jaw); inner.add(claw, ext);
-  const mouth = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 4), new THREE.MeshBasicMaterial({ color: 0 })); mouth.visible = false; head.add(mouth);
-  const k = type === 'mass' ? 1 : 0.3;
+  const mouth = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 4), new THREE.MeshBasicMaterial({ color: 0 })); mouth.visible = false; (R ? R.bones.head : head).add(mouth);
+  const k = R ? 0.12 : type === 'mass' ? 1 : 0.3;
+  // 괴물 코드가 움직이는 팔/다리/머리 값을 뼈에 옮긴다 (보스는 집게팔이 -x 쪽이라 좌우를 바꿔 쓴다)
+  const armL = type === 'boss' ? arms[1] : arms[0], armR = type === 'boss' ? arms[0] : arms[1];
+  const poseBones = () => {
+    if (!R) return; const B = R.bones;
+    B.spine.rotation.set(body.rotation.x * 0.75, body.rotation.y * 0.7, body.rotation.z * 0.6);
+    B.neck.rotation.set(head.rotation.x * 0.35, (head.rotation.y + spin.rotation.y) * 0.3, head.rotation.z * 0.35);
+    B.head.rotation.set(head.rotation.x * 0.65, (head.rotation.y + spin.rotation.y) * 0.7, head.rotation.z * 0.65);
+    B.upL.rotation.set(armL.sh.rotation.x, 0, armL.sh.rotation.z * 0.5); B.foL.rotation.set(armL.fore.rotation.x * 1.2, 0, 0);
+    B.upR.rotation.set(armR.sh.rotation.x, 0, armR.sh.rotation.z * 0.5); B.foR.rotation.set(armR.fore.rotation.x * 1.2, 0, 0);
+    B.thL.rotation.x = legs[0].rotation.x * 0.8; B.shinL.rotation.x = knees[0].rotation.x * 0.75;
+    B.thR.rotation.x = legs[1].rotation.x * 0.8; B.shinR.rotation.x = knees[1].rotation.x * 0.75;
+  };
   const ud = g.userData = {
     body, head, spin, hair, arms, legs: type === 'crawler' ? [] : legs, knees, jaw, claw, ext, dangles: [], eyes: [], mouth, mouthBase: [1, 1, 1], twitch: 0, static: true,
     faceY: (type === 'crawler' ? WALL_H - M.H * 0.45 : M.faceY) * (scale || 1), faceZ: M.faceZ, screamMouth: [1, 1, 1],
-    sync() { inner.position.copy(body.position); inner.rotation.set(body.rotation.x * k, body.rotation.y, body.rotation.z * 0.7); inner.scale.copy(body.scale); },
+    sync() { inner.position.copy(body.position); inner.rotation.set(body.rotation.x * k, body.rotation.y * (R ? 0.4 : 1), body.rotation.z * (R ? 0.3 : 0.7)); inner.scale.copy(body.scale); poseBones(); },
+    headBone: R ? R.bones.head : head,
     reach: v => { body.position.z = (v - 1) * 0.5; },
     setEyes: on => eyeMat.color.setHex(on ? 0xff2010 : 0x1a0000),
     setMode: mode => { spin.rotation.y = mode === 'moon' ? Math.PI : 0; },
-    wobble() {}
+    wobble(t, a) { if (mesh.userData.animU) { mesh.userData.animU.uTime.value = t; mesh.userData.animU.uAmp.value = a; } },
+    animU: mesh.userData.animU
   };
   if (type === 'boss') { ud.reset = () => { ud.setMode('sun'); ud.reach(1); body.rotation.set(0, 0, 0); body.position.set(0, 0, 0); head.rotation.set(0, 0, 0); }; ud.onDeath = () => ud.reach(1.5); }
   if (type === 'robot') ud.onDeath = () => ud.setEyes(true);
@@ -1910,7 +2013,13 @@ function staticMonster(type, scale) {
 }
 // 부서질 때: 하나로 된 모델을 작은 덩어리들로 쪼갠다 (셔터 이쪽으로 넘어온 덩어리만 떨어져 나온다)
 function chunkify(mesh, cell = 0.32) {
-  const geo = mesh.geometry, p = geo.attributes.position, buckets = new Map();
+  let geo = mesh.geometry;
+  if (mesh.isSkinnedMesh) {   // 뼈로 움직인 현재 자세를 형상에 굳힌다
+    mesh.skeleton.update(); geo = geo.clone(); const pa = geo.attributes.position, v = new THREE.Vector3();
+    for (let i = 0; i < pa.count; i++) { v.fromBufferAttribute(mesh.geometry.attributes.position, i); mesh.applyBoneTransform(i, v); pa.setXYZ(i, v.x, v.y, v.z); }
+    geo.deleteAttribute('skinIndex'); geo.deleteAttribute('skinWeight');
+  }
+  const p = geo.attributes.position, buckets = new Map();
   for (let t = 0; t < p.count; t += 3) {
     const key = [0, 1, 2].map(a => Math.floor(((p.array[t * 3 + a] + p.array[(t + 1) * 3 + a] + p.array[(t + 2) * 3 + a]) / 3) / cell)).join(',');
     if (!buckets.has(key)) buckets.set(key, []); buckets.get(key).push(t);
@@ -1920,7 +2029,7 @@ function chunkify(mesh, cell = 0.32) {
     const g2 = new THREE.BufferGeometry();
     for (const k of Object.keys(geo.attributes)) { const src = geo.attributes[k], sz = src.itemSize, arr = new Float32Array(list.length * 3 * sz); list.forEach((t, i) => { for (let v = 0; v < 3; v++) for (let q = 0; q < sz; q++) arr[(i * 3 + v) * sz + q] = src.array[(t + v) * sz + q]; }); g2.setAttribute(k, new THREE.BufferAttribute(arr, sz)); }
     g2.computeBoundingBox(); const c = g2.boundingBox.getCenter(new THREE.Vector3()); g2.translate(-c.x, -c.y, -c.z);
-    const m = new THREE.Mesh(g2, mesh.material); m.position.copy(c); m.castShadow = true; grp.add(m);
+    const m = new THREE.Mesh(g2, mesh.material); m.position.copy(c); m.castShadow = true; m.frustumCulled = false; grp.add(m);
   }
   mesh.parent.add(grp); mesh.parent.remove(mesh);
   return grp;
@@ -2674,7 +2783,7 @@ function crushBoss() {
   B.mesh.traverse(o => { if (o.isMesh && o.userData.chunkable) toChunk.push(o); }); toChunk.forEach(o => chunkify(o));
   B.mesh.updateMatrixWorld(true);
   const meshes = [], wp = new THREE.Vector3(), headP = new THREE.Vector3();
-  B.mesh.userData.head.getWorldPosition(headP);
+  (B.mesh.userData.headBone || B.mesh.userData.head).getWorldPosition(headP);
   B.mesh.traverse(o => { if (o.isMesh && o.visible && !(o.parent && o.parent.isMesh)) meshes.push(o); });
   for (const o of meshes) {                       // 셔터 이쪽으로 넘어온 조각들은 떨어져 나온다
     o.getWorldPosition(wp);
@@ -3132,6 +3241,7 @@ function updateCrawler(m, dt, dist, pp, pt) {
   ud.legs.forEach((l, i) => { const p2 = m.anim + ((i + (i >> 1)) % 2) * Math.PI; l.hip.rotation.y = Math.sin(p2) * 0.4 * amp; l.hip.rotation.x = Math.max(0, Math.cos(p2)) * 0.35 * amp + Math.sin(S.time * 3 + i) * 0.03; });
   ud.body.position.y = Math.abs(Math.sin(m.anim)) * 0.03 * amp + Math.sin(S.time * 2) * 0.01;
   ud.body.rotation.z = Math.sin(m.anim) * 0.06 * amp;
+  if (ud.animU) { ud.animU.uPhase.value = m.anim; ud.animU.uAmp.value = 0.25 + amp; ud.animU.uTime.value = S.time; }
   ud.twitch -= dt;
   if (ud.twitch <= 0) { ud.head.rotation.set(rand(-0.3, 0.3), rand(-0.4, 0.4), rand(-1.6, 1.6)); ud.twitch = rand(0.05, m.state === 'chase' ? 0.2 : 0.9); }
   ud.mouth.scale.y = ud.mouthBase[1] * (m.state === 'chase' ? 2.2 : 1);
