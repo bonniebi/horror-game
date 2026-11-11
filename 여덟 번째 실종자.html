@@ -964,7 +964,7 @@ sfx.radio = pos => {
   if (!ac) return; const t = ac.currentTime, p = panner(pos); p.refDistance = 2.5; out(p, 0.3);
   const n = noiseSrc(), bp = filt('bandpass', rand(900, 2200), 3), am = amGain(rand(8, 20), 0.8), g = envGain(t, 0.05, 0.22, rand(0.4, 0.9)); n.connect(bp); bp.connect(am); am.connect(g); g.connect(p); n.start(t); n.stop(t + 1);
 };
-// 기워진 것의 잡아먹는 비명: "끼에에엑—에에게게게엑!" 찢어지는 기계 목소리 → 무는 순간 뚝 끊긴다
+// 기워진 것의 잡아먹는 비명: "끼에에엥에에에에에엑!" 끊김 없이 길게 찢어지는 기계 목소리 → 무는 순간 뚝 끊긴다
 sfx.bossScream = () => {
   if (!ac) return; const t = ac.currentTime, END = t + 1.02;
   const bus = ac.createGain(); bus.gain.setValueAtTime(1, t); bus.gain.setValueAtTime(1, END - 0.01); bus.gain.linearRampToValueAtTime(0, END); out(bus, 0.2);
@@ -973,20 +973,17 @@ sfx.bossScream = () => {
   const vf1 = filt('bandpass', 2600, 4), vf2 = filt('bandpass', 1400, 3), vdry = ac.createGain(); vdry.gain.value = 0.35;
   const gate = ac.createGain(); gate.gain.setValueAtTime(0, t);
   [vf1, vf2, vdry].forEach(n => n.connect(gate)); gate.connect(sh);
-  // 음 높이: 끼(치솟음) → 에에에(떨림) → 게게게(덜컥대는 계단) → 엑(더 치솟았다 뚝)
-  const pitch = ac.createConstantSource(); pitch.offset.setValueAtTime(420, t); pitch.offset.exponentialRampToValueAtTime(1250, t + 0.07); pitch.offset.setValueAtTime(1250, t + 0.07);
-  pitch.offset.linearRampToValueAtTime(1050, t + 0.45);
-  for (let k = 0, tk = t + 0.45; tk < END - 0.12; k++, tk += rand(0.035, 0.06)) pitch.offset.setValueAtTime((k % 2 ? 820 : 1120) * rand(0.92, 1.08), tk);
-  pitch.offset.setValueAtTime(1100, END - 0.12); pitch.offset.exponentialRampToValueAtTime(1900, END);
-  const vib = osc('sine', 14), vibG = ac.createGain(); vibG.gain.setValueAtTime(40, t); vibG.gain.linearRampToValueAtTime(160, t + 0.4); vib.connect(vibG);
+  // 음 높이: 끼(치솟음) → 에에엥(살짝 내려앉아 길게) → 에에에(천천히 다시 올라가며) → 엑(확 치솟았다 뚝)
+  const pitch = ac.createConstantSource(); pitch.offset.setValueAtTime(420, t); pitch.offset.exponentialRampToValueAtTime(1250, t + 0.07);
+  pitch.offset.linearRampToValueAtTime(1000, t + 0.3); pitch.offset.linearRampToValueAtTime(1080, t + 0.6); pitch.offset.linearRampToValueAtTime(1200, END - 0.12);
+  pitch.offset.exponentialRampToValueAtTime(1900, END);
+  const vib = osc('sine', 14), vibG = ac.createGain(); vibG.gain.setValueAtTime(30, t); vibG.gain.linearRampToValueAtTime(70, t + 0.4); vib.connect(vibG);
   for (const det of [1, 1.013, 0.497]) {
     const o = osc('sawtooth', 0); o.frequency.value = 0; const m = ac.createGain(); m.gain.value = det; pitch.connect(m); m.connect(o.frequency); vibG.connect(o.frequency);
     o.connect(vf1); o.connect(vf2); o.connect(vdry); o.start(t); o.stop(END + 0.02);
   }
   // 덜컥대는 성문(게게게): 0.45초부터 빠르게 켰다 껐다
-  gate.gain.linearRampToValueAtTime(0.9, t + 0.03); gate.gain.setValueAtTime(0.9, t + 0.45);
-  for (let tk = t + 0.45, on = 0; tk < END - 0.12; tk += rand(0.028, 0.05), on ^= 1) gate.gain.setValueAtTime(on ? 1 : 0.15, tk);
-  gate.gain.setValueAtTime(1, END - 0.12);
+  gate.gain.linearRampToValueAtTime(0.9, t + 0.03); gate.gain.linearRampToValueAtTime(1, END - 0.12);   // 끊기지 않고 쭉
   vf1.frequency.setValueAtTime(3200, t); vf1.frequency.linearRampToValueAtTime(2300, t + 0.4); vf1.frequency.setValueAtTime(2800, END - 0.12);
   // 쇠가 긁히는 고음 + 찢어지는 잡음 + 첫 순간 쿵
   const sq = osc('square', 3400), sqF = osc('sine', 37), sqG = ac.createGain(); sqG.gain.value = 900; sqF.connect(sqG); sqG.connect(sq.frequency);
