@@ -2246,7 +2246,7 @@ function makeMaskHead() {
   }
   // 턱 기계: 엘리베이터처럼 위아래로만 움직인다. 양옆에 수직 유압 피스톤 + 톱니바퀴와 맞물린 톱니 막대(랙)
   const pistonMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0x5a544c, metalness: 0.8, roughness: 0.5 }), rodMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0x8c8a86, metalness: 0.9, roughness: 0.35 });
-  const mechs = [], JAW_DROP = 0.085, GR = 0.022;
+  const mechs = [], GR = 0.022; let JAW_DROP = 0.085;
   for (const sx of [-1, 1]) {
     const X = headPt(sx, -0.3, 0.05).x + sx * 0.012;
     // 고정된 쪽 (머리): 피스톤 통 + 받침판 + 톱니바퀴
@@ -2279,6 +2279,7 @@ function makeMaskHead() {
   let t = 0, target = 0;
   return {
     g, jaw, throat,
+    setJawMax(v) { JAW_DROP = v; },                                           // 잡아먹을 땐 턱이 레일 끝까지 내려간다
     setMode(mode) { target = mode === 'moon' ? 1 : 0; },
     snap(mode) { target = t = mode === 'moon' ? 1 : 0; this.update(0); },
     update(dt) {
@@ -2378,7 +2379,7 @@ function staticMonster(type, scale) {
   };
   if (type === 'boss') {
     if (MH) { ud.mouth = MH.throat; ud.screamMouth = [1.5, 2.2, 1.2]; ud.setMode = mode => { MH.setMode(mode); }; ud.maskHead = MH; ud.faceX = JOINTS.boss.skull[0]; ud.faceY = JOINTS.boss.skull[1] - 0.02; ud.faceZ = JOINTS.boss.skull[2] + 0.26; }
-    ud.reset = () => { if (MH) MH.snap('sun'); else ud.setMode('sun'); ud.reach(1); body.rotation.set(0, 0, 0); body.position.set(0, 0, 0); head.rotation.set(0, 0, 0); jaw.rotation.set(0, 0, 0); };
+    ud.reset = () => { if (MH) { MH.snap('sun'); MH.setJawMax(0.085); } else ud.setMode('sun'); ud.reach(1); body.rotation.set(0, 0, 0); body.position.set(0, 0, 0); head.rotation.set(0, 0, 0); jaw.rotation.set(0, 0, 0); };
     ud.onDeath = () => { ud.reach(1.5); jaw.rotation.x = 1.0; };
   }
   if (type === 'robot') ud.onDeath = () => ud.setEyes(true);
@@ -4271,7 +4272,7 @@ function updateWatcher(m, dt, dist, pp, pt) {
    점프스케어
    ========================================================= */
 function triggerDeath(m) {
-  S.state = 'dying'; S.deathT = 0; S.killer = m;
+  S.state = 'dying'; S.deathT = 0; S.killer = m; S.bitDone = false;
   sfx.scream(); sfx.impact(); S.musicTarget = 0;
   const pl = S.player, monsterMesh = m.mesh;
   const d = m.pos.clone().sub(new THREE.Vector3(pl.pos.x, 0, pl.pos.z)).setY(0).normalize();
@@ -4291,6 +4292,21 @@ function triggerDeath(m) {
   $('flash').style.transition = 'none'; $('flash').style.opacity = 0.6;
   requestAnimationFrame(() => { $('flash').style.transition = 'opacity .4s'; $('flash').style.opacity = 0; });
 }
+// 기워진 것의 잡아먹기: 달려들며 턱을 레일 끝까지 쩍 내리고, 두 팔로 양옆을 감싸 붙잡은 뒤, 머리를 들이밀어 '철컥' 문다
+function bossDevour(ud, mesh, pl) {
+  const t = S.deathT, sm = (a, b) => { const x = Math.max(0, Math.min(1, (t - a) / (b - a))); return x * x * (3 - 2 * x); };
+  const open = sm(0.05, 0.35), grab = sm(0.25, 0.75), bite = sm(1.0, 1.07);
+  ud.maskHead.setJawMax(0.15);
+  ud.jaw.rotation.x = 0.9 * open * (1 - bite) + (open > 0.99 && bite === 0 ? rand(-0.04, 0) : 0);     // 끝까지 벌린 채 덜덜 떨다가 한 번에 닫힌다
+  ud.body.rotation.set(0.04 * grab, 0, 0);
+  ud.head.rotation.set(-0.18 * open * (1 - bite) + 0.25 * bite + rand(-0.02, 0.02), rand(-0.03, 0.03), rand(-0.04, 0.04));   // 고개를 살짝 젖혀 입을 벌렸다가 내리찍는다
+  ud.arms.forEach((a, i) => { a.sh.rotation.x = -0.4 - 0.9 * grab; a.sh.rotation.z = (i ? -1 : 1) * 0.5 * (1 - 0.4 * grab); a.fore.rotation.x = -0.2 - 0.7 * grab; });   // 양옆에서 감싸 쥔다
+  if (bite > 0 && !S.bitDone) { S.bitDone = true; sfx.clank(mesh.position, 1.2); sfx.crunch && sfx.crunch(mesh.position); S.shake = 0.25; S.glitch = 1; }
+  if (t > 1.12) S.blackout = 1;                                                                           // 물리는 순간 암전
+  // 입이 카메라 쪽으로 오도록 조금 아래·가까이
+  const ld = 2.6 - (2.6 - 0.36) * Math.min(1, t / 0.13) ** 2 - 0.18 * bite + (ud.faceZ || 0);
+  mesh.position.set(pl.pos.x + S.lunge.x * ld, EYE - ud.faceY + 0.05 * open, pl.pos.z + S.lunge.z * ld);
+}
 function updateDying(dt) {
   S.deathT += dt;
   const pl = S.player, k = Math.max(0, 1 - S.deathT / 1.8);
@@ -4302,8 +4318,11 @@ function updateDying(dt) {
   if (ud.faceX) { const ry = monsterMesh.rotation.y; monsterMesh.position.x -= Math.cos(ry) * ud.faceX; monsterMesh.position.z += Math.sin(ry) * ud.faceX; }
   camera.fov = 72 - 14 * lt; camera.updateProjectionMatrix();
   S.glitch = Math.max(S.glitch, 0.7 * k); S.fear = 1;
-  ud.head.rotation.set(rand(-0.25, 0.25), rand(-0.25, 0.25), rand(-0.6, 0.6));
-  if (ud.jaw) ud.jaw.rotation.x = rand(0.8, 1.25);           // 턱이 덜컥덜컥 벌어진다
+  if (ud.maskHead) bossDevour(ud, monsterMesh, pl);
+  else {
+    ud.head.rotation.set(rand(-0.25, 0.25), rand(-0.25, 0.25), rand(-0.6, 0.6));
+    if (ud.jaw) ud.jaw.rotation.x = rand(0.8, 1.25);           // 턱이 덜컥덜컥 벌어진다
+  }
   flashlight.intensity = Math.random() < 0.3 ? 2 : 30;
   if (S.deathT > 1.7) { camera.fov = 72; camera.updateProjectionMatrix(); endGame(false); }
 }
