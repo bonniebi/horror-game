@@ -2139,7 +2139,7 @@ function makeMaskHead() {
   const g = new THREE.Group(), add = (geo, mat, x, y, z, par = g) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; par.add(m); return m; };
   const MOUTH = -0.43;                                     // 입 선 (방향 y)
   const maskEdge = d => d.x < 0.035 + 0.035 * Math.sin(d.y * 23 + 1) + 0.02 * Math.sin(d.y * 61) + 0.012 * Math.sin(d.y * 140);   // 깨진 가장자리
-  const CHIPS = [[-0.1, 0.55, 0.82, 0.1], [-0.55, 0.45, 0.7, 0.07], [-0.2, -0.3, 0.93, 0.05]];
+  const CHIPS = [[-0.1, 0.55, 0.82, 0.1], [-0.55, 0.45, 0.7, 0.07], [-0.2, -0.3, 0.93, 0.05], [-0.9, -0.28, 0.25, 0.36]];
   // 강철 두개골
   const steelR = d => { const [c, b] = steelDetail(d); return headBase(d) + c + b; };
   const steelCol = (d, c) => { const cav = steelDetail(d)[0]; const ao = Math.max(0.28, Math.min(1, 1 + cav * 3.5)); c[0] = c[1] = c[2] = ao;
@@ -2156,15 +2156,6 @@ function makeMaskHead() {
   add(new THREE.SphereGeometry(0.022, 16, 12), lensMat, eyeR.x, eyeR.y, eyeR.z - 0.004).scale.z = 0.6;
   add(new THREE.TorusGeometry(0.031, 0.005, 8, 24), toothSteel, eyeR.x, eyeR.y, eyeR.z + 0.008);
   for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2, b = add(new THREE.BoxGeometry(0.004, 0.012, 0.003), P.metal, eyeR.x + Math.cos(a) * 0.02, eyeR.y + Math.sin(a) * 0.02, eyeR.z - 0.004); b.rotation.z = a; }  // 조리개 날
-  // 왼쪽 눈구멍(가면 밑): 붉은 불빛 + 스피커 그물
-  const eyeL = headPt(...EYE_L, 1, -0.01);
-  const ledMat = new THREE.MeshBasicMaterial({ color: 0x300000, fog: false });
-  add(new THREE.SphereGeometry(0.011, 10, 8), ledMat, eyeL.x, eyeL.y, eyeL.z - 0.008);
-  const grille = new THREE.Group(); const gp = headPt(-0.62, -0.22, 0.76, 1, -0.01); grille.position.copy(gp); grille.lookAt(gp.clone().multiplyScalar(3)); g.add(grille);
-  add(new THREE.CircleGeometry(0.036, 32), new THREE.MeshStandardMaterial({ color: 0x9a9690, metalness: 0.8, roughness: 0.45, map: grilleTex, alphaMap: grilleTex, alphaTest: 0.5, side: THREE.DoubleSide }), 0, 0, 0.002, grille);
-  add(new THREE.CircleGeometry(0.036, 32), new THREE.MeshBasicMaterial({ color: 0x120000 }), 0, 0, -0.004, grille);
-  add(new THREE.TorusGeometry(0.037, 0.004, 8, 32), toothSteel, 0, 0, 0.002, grille);
-  const piston = add(new THREE.CylinderGeometry(0.009, 0.009, 0.12, 10), P.metal, 0.14, -0.1, 0.02); piston.rotation.z = 0.45;
   const V = (x, y, z) => new THREE.Vector3(x, y, z);
   for (let i = 0; i < 4; i++) g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([V(0.09 + i * 0.012, -0.12, -0.04), V(0.12 + i * 0.015, -0.2, -0.02), V(0.08 + i * 0.02, -0.3, -0.06)]), 10, 0.0045, 5), [P.wire, P.wire, new THREE.MeshStandardMaterial({ color: 0x7a1010 }), P.wire][i]));
   // 이빨 줄: 입 선을 따라 표면에 박는다
@@ -2177,24 +2168,23 @@ function makeMaskHead() {
       t.rotation.order = 'YXZ'; t.rotation.y = a; t.rotation.x = up ? -0.12 : 0.12; t.rotation.z = (up ? 0 : Math.PI) + rand(-0.1, 0.1);
     }
   };
-  teeth(g, false, V(0, 0, 0), 13, 2.0, 0.042, 0.07, 0.0085, 0.93, 0.01);
-  teeth(g, false, V(0, 0, 0), 9, 1.5, 0.03, 0.045, 0.007, 0.84, 0.0);
+  teeth(g, false, V(0, 0, 0), 17, 2.1, 0.042, 0.07, 0.0075, 0.93, 0.01);
+  teeth(g, false, V(0, 0, 0), 13, 1.7, 0.03, 0.045, 0.0062, 0.85, 0.0);
+  teeth(g, false, V(0, 0, 0), 9, 1.2, 0.022, 0.03, 0.005, 0.77, -0.005);
   const gumPts = []; for (let i = 0; i <= 16; i++) { const a = (i / 16 - 0.5) * 2.1; gumPts.push(headPt(Math.sin(a), MOUTH + 0.02, Math.cos(a), 0.92)); }
   add(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(gumPts), 40, 0.007, 6), headSteel, 0, 0, 0);
   const throat = add(new THREE.SphereGeometry(0.075, 14, 10), new THREE.MeshBasicMaterial({ color: 0x050303 }), 0, -0.1, 0.06); throat.scale.set(1.15, 0.8, 0.9);
-  // 아래턱: 따로 깎은 강철 턱뼈 + 아랫니 + 가면 턱 조각
+  // 아래턱: 따로 깎은 강철 턱뼈 + 촘촘한 아랫니 (양쪽 피스톤과 톱니가 움직인다)
   const JP = V(0, -0.055, -0.03), jaw = new THREE.Group(); jaw.position.copy(JP); g.add(jaw);
   const jawR = d => 0.94 * headBase(d) + 0.12 * hd(d, 0, -0.85, 0.5, 0.3) + 0.05 * Math.exp(-(((d.y + 0.62) / 0.05) ** 2)) * Math.max(0, d.z) + steelDetail(d)[1] - 0.03 * hd(d, 0.5, -0.6, 0.6, 0.15);
   const jawCol = (d, c) => { const e = Math.max(0.3, 1 - 2.5 * Math.max(0, d.y - MOUTH + 0.04)); c[0] = e; c[1] = c[2] = e * (d.y > -0.6 ? 0.55 : 1); };
   const jawGeo = headShell(110, jawR, jawCol, d => d.y < MOUTH - 0.01 && d.y > -0.97 && d.z > -0.05); jawGeo.translate(-JP.x, -JP.y, -JP.z);
   add(jawGeo, headSteel, 0, 0, 0, jaw);
   const jawIn = jawGeo.clone(); add(jawIn, new THREE.MeshStandardMaterial({ color: 0x1a0606, roughness: 0.6, side: THREE.BackSide }), 0, 0, 0, jaw);
-  teeth(jaw, true, JP, 13, 1.9, 0.038, 0.062, 0.008, 0.9, -0.03);
-  teeth(jaw, true, JP, 9, 1.4, 0.028, 0.04, 0.0065, 0.82, -0.035);
-  const chinR = d => jawR(d) + 0.075, paintCol = (d, c) => { const e = Math.min(1, segDist(d, GRIN) / 0.05); c[0] = 0.4 + 0.6 * e; c[1] = c[2] = 0.05 + 0.95 * e; };
-  const chinGeo = headShell(110, chinR, paintCol, d => maskEdge(d) && d.y < MOUTH - 0.02 && d.y > -0.9 && d.z > 0.05); chinGeo.translate(-JP.x, -JP.y, -JP.z);
-  add(chinGeo, maskMat, 0, 0, 0, jaw); add(chinGeo, maskInner, 0, 0, 0, jaw);
-  // 가면 (왼쪽 반): 매끈한 사람 얼굴, 귀까지 찢어진 웃음, 검은 눈물. 관자놀이 경첩으로 쩍 열린다
+  teeth(jaw, true, JP, 17, 2.0, 0.038, 0.062, 0.0072, 0.9, -0.03);
+  teeth(jaw, true, JP, 13, 1.6, 0.028, 0.04, 0.006, 0.83, -0.035);
+  teeth(jaw, true, JP, 9, 1.15, 0.02, 0.028, 0.005, 0.76, -0.04);
+  // 가면 (왼쪽 반): 매끈한 사람 얼굴, 귀까지 찢어진 웃음, 검은 눈물. 얼굴에 박혀 움직이지 않는다 (턱 경첩 쪽은 깨져 나가 기계가 보인다)
   const maskR = d => headBase(d) + 0.075 - 0.07 * hd(d, ...EYE_L, 0.2)
     + 0.13 * Math.exp(-((d.x / 0.07) ** 2) - (((d.y + 0.12) / 0.16) ** 2)) * Math.max(0, d.z)        // 코
     + 0.06 * hd(d, -0.42, -0.27, 0.86, 0.15)                                                         // 볼
@@ -2212,7 +2202,10 @@ function makeMaskHead() {
   const HP = V(-0.165, 0.0, -0.05), hinge = new THREE.Group(); hinge.position.copy(HP); g.add(hinge);
   const mask = new THREE.Group(); mask.position.copy(HP).negate(); hinge.add(mask);
   add(maskGeo, maskMat, 0, 0, 0, mask); add(maskGeo, maskInner, 0, 0, 0, mask);
-  const pin = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }); const pp = headPt(...EYE_L, 1, 0.02); add(new THREE.SphereGeometry(0.0045, 8, 6), pin, pp.x, pp.y, pp.z, mask);   // 가면 눈구멍 속 작은 빛
+  const pin = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }); const pp = headPt(...EYE_L, 1, 0.02); add(new THREE.SphereGeometry(0.007, 10, 8), pin, pp.x, pp.y, pp.z, mask);
+  const glowTex = canvasTex(64, (c, s) => { const gr = c.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.25, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = gr; c.fillRect(0, 0, s, s); });
+  const mkGlow = (p, par) => { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true })); sp.position.copy(p); sp.scale.setScalar(0.07); par.add(sp); return sp; };
+  const pinGlow = mkGlow(pp.clone().add(V(0, 0, 0.01)), mask), lensGlow = mkGlow(eyeR.clone().add(V(0, 0, 0.012)), g);   // 가면 눈구멍 속 작은 빛
   // 뜯겨 열린 정수리: 비틀려 들린 강철 뚜껑, 안에서 도는 톱니, 뒤로 쏟아져 늘어진 전선 다발
   const inner = add(skull, new THREE.MeshBasicMaterial({ color: 0x070505, side: THREE.BackSide }), 0, 0, 0);
   const lid = add(headShell(90, steelR, steelCol, inHole), headSteel, 0, 0, 0);
@@ -2252,6 +2245,33 @@ function makeMaskHead() {
   { const uv = moonGeo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 3 + 0.5, uv.getY(i) * 3 + 0.5); }
   add(moonGeo, moonMat, 0, 0, 0, moonG);
   for (let i = 1; i < 6; i++) { const a = A0 + (A1 - A0) * i / 6; add(new THREE.SphereGeometry(0.006, 8, 6), toothSteel, Math.cos(a) * 0.285, Math.sin(a) * 0.285, 0.008, moonG); }
+  // 턱 기계: 양쪽 볼의 유압 피스톤(위는 두개골, 아래는 턱에 볼트로) + 턱 경첩의 맞물린 톱니
+  const pistonMat = new THREE.MeshStandardMaterial({ color: 0x2a2826, metalness: 0.85, roughness: 0.35 }), rodMat = new THREE.MeshStandardMaterial({ color: 0xd8dde2, metalness: 1, roughness: 0.12 });
+  const mechs = [];
+  for (const sx of [-1, 1]) {
+    const A = V(sx * 0.163, 0.035, -0.07), Bl = V(sx * 0.15, -0.115, 0.075).sub(JP);
+    const barrel = add(new THREE.CylinderGeometry(0.011, 0.011, 0.075, 12), pistonMat, 0, 0, 0);
+    add(new THREE.CylinderGeometry(0.013, 0.013, 0.008, 12), toothSteel, 0, 0.034, 0, barrel); add(new THREE.CylinderGeometry(0.013, 0.013, 0.008, 12), toothSteel, 0, -0.034, 0, barrel);
+    const rod = add(new THREE.CylinderGeometry(0.0055, 0.0055, 0.08, 10), rodMat, 0, 0, 0);
+    add(new THREE.SphereGeometry(0.009, 10, 8), toothSteel, A.x, A.y, A.z);                       // 위 볼트
+    add(new THREE.SphereGeometry(0.009, 10, 8), toothSteel, Bl.x, Bl.y, Bl.z, jaw);               // 아래 볼트 (턱과 함께)
+    const hose = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([A.clone().add(V(0, 0.03, -0.02)), V(sx * 0.17, 0.08, -0.1), V(sx * 0.12, 0.12, -0.15)]), 10, 0.004, 5), P.wire); g.add(hose);
+    const H = V(sx * 0.158, JP.y, JP.z);
+    const gBig = add(gearGeo(0.032, 12, 0.01), gearMat, H.x, H.y, H.z), gSmall = add(gearGeo(0.019, 8, 0.01), gearMat, H.x + sx * 0.002, H.y + 0.038, H.z + 0.028);
+    gBig.rotation.y = gSmall.rotation.y = sx * Math.PI / 2; gBig.position.x -= sx * 0.005; gSmall.position.x -= sx * 0.005;
+    add(new THREE.CylinderGeometry(0.008, 0.008, 0.02, 10), toothSteel, H.x, H.y, H.z).rotation.z = Math.PI / 2;   // 경첩 축
+    mechs.push({ A, Bl, barrel, rod, gBig, gSmall, sx });
+  }
+  const _b = new THREE.Vector3(), _d = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+  const driveJaw = () => {
+    jaw.rotation.x = Math.round(jaw.rotation.x * 28) / 28;                       // 기계라 매끈하지 않고 딸깍딸깍 끊겨 움직인다
+    for (const m of mechs) {
+      _b.copy(m.Bl).applyEuler(jaw.rotation).add(jaw.position); _d.copy(_b).sub(m.A); const L = _d.length(); _d.divideScalar(L);
+      m.barrel.position.copy(m.A).addScaledVector(_d, 0.04); m.barrel.quaternion.setFromUnitVectors(_up, _d);
+      m.rod.position.copy(_b).addScaledVector(_d, -0.04); m.rod.quaternion.setFromUnitVectors(_up, _d);
+      m.gBig.rotation.x = jaw.rotation.x * 2.4 * m.sx; m.gSmall.rotation.x = -jaw.rotation.x * 2.4 * (12 / 8) * m.sx;
+    }
+  };
   // 하얀 눈빛: 손전등처럼 앞을 훑는다
   const beam = new THREE.SpotLight(0xdfe8ff, 0, 13, 0.32, 0.6, 1.5); beam.position.copy(eyeR); const bt = new THREE.Object3D(); bt.position.set(eyeR.x, -0.4, 2); g.add(beam, bt); beam.target = bt;
   let t = 0, target = 0;
@@ -2261,11 +2281,12 @@ function makeMaskHead() {
     snap(mode) { target = t = mode === 'moon' ? 1 : 0; this.update(0); },
     update(dt) {
       t += (target - t) * Math.min(1, dt * 9);
-      hinge.rotation.y = -t * 1.75; hinge.rotation.z = t * 0.25;                 // 가면이 쩍 열린다
-      grille.scale.setScalar(0.6 + 0.6 * t);
+      driveJaw();
       const on = 1 - t, pulse = 0.5 + 0.5 * Math.sin(S.time * 7);
-      lensMat.color.setRGB(0.08 + 0.85 * on, 0.08 + 0.9 * on, 0.1 + 0.9 * on); pin.color.setScalar(on);
-      ledMat.color.setRGB(0.2 + 0.8 * t * pulse, 0, 0);
+      lensMat.color.setRGB(0.08 + 0.85 * on, 0.08 + 0.9 * on, 0.1 + 0.9 * on);
+      pin.color.setRGB(on + t * (0.35 + 0.65 * pulse), on, on);                     // 가면 눈: 하얀 빛 → 깜빡이는 붉은 빛
+      pinGlow.material.color.setRGB(0.5 * on + t * (0.4 + 0.6 * pulse), 0.5 * on, 0.55 * on); pinGlow.scale.setScalar(0.05 + 0.05 * t);
+      lensGlow.material.color.setRGB(0.8 * on, 0.85 * on, 0.95 * on);
       beam.intensity = 7 * on;
       rays.forEach((r, i) => { r.scale.y = 0.35 + 0.65 * on; });                    // 대못이 쑥 튀어나온다 / 들어간다
       moonG.rotation.z = -t * 0.55; moonG.position.z = -0.07 + 0.05 * t; moonMat.emissive.setRGB(0.06 * t * (0.4 + 0.6 * pulse), 0, 0);
@@ -4074,7 +4095,7 @@ function updateBoss(m, dt, dist, pp, pt) {
   if (m.breathT <= 0) { sfx.bigBreath(head, m.state === 'chase'); m.breathT = m.state === 'chase' ? rand(0.9, 1.3) : rand(2.4, 3.4); }
   setVoice(m, head, m.state === 'chase' || m.state === 'grab' ? 0.75 : 0.35, moon ? 1.8 : 0.5);
   // 아래턱: 쫓을 땐 덜그럭덜그럭 떨린다
-  ud.jaw.rotation.x = m.state === 'chase' || m.state === 'grab' ? 0.45 + Math.abs(Math.sin(S.time * 23)) * 0.35 : 0.3 + Math.sin(S.time * 1.7) * 0.06;
+  ud.jaw.rotation.x = (m.state === 'chase' || m.state === 'grab' ? 0.45 + Math.abs(Math.sin(S.time * 23)) * 0.35 : 0.3 + Math.sin(S.time * 1.7) * 0.06) + (moon ? 0.18 + Math.abs(Math.sin(S.time * 31)) * 0.12 : 0);   // 듣는 모드: 턱을 더 벌리고 덜덜 떤다
   ud.claw.rotation.y += dt * (m.state === 'chase' ? 6 : 0.8);
   ud.dangles.forEach((d, i) => { d.rotation.x = Math.sin(S.time * 2.6 + i) * 0.35 + (moon ? -0.9 : 0); d.rotation.z = Math.cos(S.time * 2 + i) * 0.25; });
 
