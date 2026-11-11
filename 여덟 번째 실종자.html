@@ -935,13 +935,34 @@ sfx.cry = (type, pos) => {
     [85, 97, 113, 128, 151].forEach(f => { const o = osc('sawtooth', f * rand(0.97, 1.03)); o.frequency.exponentialRampToValueAtTime(f * 0.7, t + 1.6); o.connect(f1); o.connect(f2); o.start(t); o.stop(t + 1.7); });
   } else if (type === 'watcher') {   // 도자기가 갈라지는 소리와 킥킥거림
     sfx.crunch(pos); if (Math.random() < 0.5) sfx.giggle(pos);
-  } else if (type === 'boss') sfx.screech(pos);
+  } else if (type === 'boss') {
+    if (S.bossMode === 'moon') {     // 가면 안 스피커에서 새어 나오는, 겹쳐진 아이들 웃음 + 지직거림
+      const bp = filt('bandpass', 1400, 2), sh = gritShaper(); bp.connect(sh); sh.connect(p);
+      for (let v = 0; v < 4; v++) for (let i = 0; i < 6; i++) { const tk = t + v * 0.05 + i * rand(0.09, 0.14), o = osc('sawtooth', rand(380, 620) * (1 - i * 0.04)), g = envGain(tk, 0.006, 0.2, rand(0.05, 0.09)); o.connect(g); g.connect(bp); o.start(tk); o.stop(tk + 0.12); }
+      const n = noiseSrc(), hp = filt('highpass', 2500), ng = envGain(t, 0.02, 0.25, 1.1); n.connect(hp); hp.connect(ng); ng.connect(p); n.start(t); n.stop(t + 1.2);
+    } else {                          // 오르골 선율이 비명처럼 찢어지며 늘어진다
+      const sh = gritShaper(); sh.connect(p);
+      [988, 880, 1175, 740].forEach((f, i) => { const tk = t + i * 0.12, o = osc('triangle', f), g = envGain(tk, 0.004, 0.35, 0.5); o.frequency.exponentialRampToValueAtTime(f * 0.45, tk + 0.9); o.connect(g); g.connect(sh); o.start(tk); o.stop(tk + 1); });
+      sfx.screech(pos);
+    }
+  }
 };
 // 카메라 플래시: 충전 소리 → 찰칵·펑
 sfx.camFlash = () => {
   if (!ac) return; const t = ac.currentTime;
   const o = osc('sine', 1800), g = envGain(t, 0.01, 0.06, 0.25); o.frequency.exponentialRampToValueAtTime(4200, t + 0.25); o.connect(g); out(g, 0.1); o.start(t); o.stop(t + 0.3);
   const n = noiseSrc(), hp = filt('highpass', 1500), ng = envGain(t + 0.27, 0.001, 0.8, 0.12); n.connect(hp); hp.connect(ng); out(ng, 0.4); n.start(t + 0.27); n.stop(t + 0.45);
+};
+// 가면이 열릴 때: 철컥 + 유압이 빠지는 소리 / 닫힐 때: 탁
+sfx.maskShift = (pos, open) => {
+  if (!ac) return; const t = ac.currentTime, p = panner(pos); p.refDistance = 3; out(p, 0.4);
+  sfx.clank(pos, open ? 0.9 : 0.6);
+  if (open) { const n = noiseSrc(), bp = filt('bandpass', 3000, 1.5), g = envGain(t + 0.05, 0.02, 0.4, 0.5); bp.frequency.exponentialRampToValueAtTime(900, t + 0.55); n.connect(bp); bp.connect(g); g.connect(p); n.start(t); n.stop(t + 0.6); }
+};
+// 듣는 모드에선 오르골 대신 라디오 잡음
+sfx.radio = pos => {
+  if (!ac) return; const t = ac.currentTime, p = panner(pos); p.refDistance = 2.5; out(p, 0.3);
+  const n = noiseSrc(), bp = filt('bandpass', rand(900, 2200), 3), am = amGain(rand(8, 20), 0.8), g = envGain(t, 0.05, 0.22, rand(0.4, 0.9)); n.connect(bp); bp.connect(am); am.connect(g); g.connect(p); n.start(t); n.stop(t + 1);
 };
 // 녹슨 경첩이 삐걱이는 소리 (문, 사물함)
 sfx.creak = pos => {
@@ -1854,7 +1875,7 @@ const JOINTS = {
     shR: [0.33, 2.0, 0], elR: [0.52, 1.65, 0.02], wrR: [0.66, 1.3, 0.05], handR: [0.7, 1.12, 0.08],
     hipL: [-0.12, 1.38, 0], knL: [-0.21, 0.76, 0.02], anL: [-0.3, 0.2, 0], toeL: [-0.3, 0.05, 0.25],
     hipR: [0.12, 1.38, 0], knR: [0.25, 0.84, 0.02], anR: [0.33, 0.2, 0], toeR: [0.33, 0.05, 0.2] },
-  boss: { pelvis: [-0.05, 1.22, -0.25], waist: [-0.05, 1.5, -0.22], neck: [0.15, 2.3, 0.05], headBase: [0.3, 2.4, 0.2], headTop: [0.39, 2.68, 0.3],
+  boss: { skull: [0.37, 2.53, 0.28], pelvis: [-0.05, 1.22, -0.25], waist: [-0.05, 1.5, -0.22], neck: [0.15, 2.3, 0.05], headBase: [0.3, 2.4, 0.2], headTop: [0.39, 2.68, 0.3],
     shL: [-0.32, 2.35, -0.1], elL: [-0.51, 1.65, 0.25], wrL: [-0.6, 1.05, 0.55], handL: [-0.62, 0.55, 0.65],
     shR: [0.21, 2.32, -0.05], elR: [0.39, 1.56, 0.1], wrR: [0.56, 1.35, 0.25], handR: [0.62, 1.0, 0.35],
     hipL: [-0.15, 1.15, -0.3], knL: [-0.1, 0.65, -0.55], anL: [-0.15, 0.24, -0.62], toeL: [-0.18, 0.03, -0.35],
@@ -1965,6 +1986,10 @@ async function loadModels() {
       geo.computeVertexNormals(); geo = geo.toNonIndexed(); geo.computeBoundingBox();
       const spec = MODEL_SPEC[key], box = geo.boundingBox, H = box.max.y;
       bakeSurface(geo, spec.tile, H);
+      if (key === 'boss') {   // 해골 머리는 잘라내고, 코드로 만든 '반쪽 가면' 머리를 단다
+        const [sx, sy, sz] = JOINTS.boss.skull;
+        [, geo] = splitTris(geo, (x, y, z) => y > sy - 0.2 && Math.hypot(x - sx, (y - sy) * 0.9, z - sz) < 0.26);
+      }
       if (key === 'stalker') {   // 긴 검은 머리: 얼굴 앞쪽만 남기고 머리 둘레와 등 뒤로 늘어진 부분을 검게
         let fx = 0, fz = -1e9, n = 0; const P2 = geo.attributes.position;
         for (let i = 0; i < P2.count; i++) if (P2.getY(i) > H * 0.86) { fx += P2.getX(i); fz = Math.max(fz, P2.getZ(i)); n++; }
@@ -2007,8 +2032,74 @@ async function loadModels() {
       geo.computeBoundingBox();
       // 잡힐 때 얼굴 앞면이 눈앞 약 0.6m에 오도록: faceZ = 몸 기준점에서 얼굴 앞면까지의 거리 - 0.1
       MODELS[key] = { geo, headGeo, pivot, mat, H, eyes, rig, faceY: ffy, faceZ: Math.max(0, ffz - 0.1), front: geo.boundingBox.max.z };
+      if (key === 'boss') { MODELS[key].faceY = JOINTS.boss.skull[1]; MODELS[key].faceZ = JOINTS.boss.skull[2] + 0.12; }
     } catch (e) { console.warn('모델을 불러오지 못했다:', key, e); }
   }
+}
+// 기워진 것의 새 머리: 왼쪽 반은 금 간 도자기 가면(웃는 입이 그려져 있다), 오른쪽 반은 드러난 강철 두개골.
+// 손전등을 켜면 가면이 닫히고 차가운 하얀 눈빛으로 '본다'. 끄면 가면이 쩍 열리며 안쪽의 귀(스피커 그물)가 드러나 '듣는다'.
+const maskMat = new THREE.MeshStandardMaterial({ map: porcelainTex, color: 0xf2eee6, roughness: 0.22, metalness: 0.05, side: THREE.DoubleSide });
+const headSteel = new THREE.MeshStandardMaterial({ color: 0x5d5a55, metalness: 0.85, roughness: 0.38, map: canvasTex(128, (c, s) => { c.fillStyle = '#8a8680'; c.fillRect(0, 0, s, s); speckle(c, s, .2, 2500); stains(c, s, 14, 'rgba(110,50,15,.7)', .25); stains(c, s, 5, 'rgba(60,4,4,.7)', .2); }) });
+const toothSteel = new THREE.MeshStandardMaterial({ color: 0x5f646b, metalness: 0.9, roughness: 0.3, map: canvasTex(32, (c, s) => { c.fillStyle = '#9aa0a8'; c.fillRect(0, 0, s, s); stains(c, s, 4, 'rgba(110,40,10,.7)', .4); stains(c, s, 3, 'rgba(70,0,0,.8)', .3); }) });
+function makeMaskHead() {
+  const g = new THREE.Group(), add = (geo, mat, x, y, z, par = g) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; par.add(m); return m; };
+  const V = (x, y, z) => new THREE.Vector3(x, y, z), dark = new THREE.MeshBasicMaterial({ color: 0x050505 });
+  // 강철 두개골 (리벳이 박힌 판들)
+  const skull = sculpt(new THREE.SphereGeometry(0.18, 30, 22), v => { dent(v, 0.075, 0.04, 0.16, 0.06, -0.22); dent(v, -0.075, 0.04, 0.16, 0.06, -0.15); if (v.y < -0.03) v.x *= 0.86; v.multiplyScalar(1 + Math.round(Math.sin(v.y * 34) * 0.6) * 0.008); });
+  add(skull, headSteel, 0, 0, 0).scale.set(0.95, 1.12, 1.0);
+  for (let i = 0; i < 9; i++) add(new THREE.SphereGeometry(0.008, 6, 4), P.frame, 0.005, 0.17 - i * 0.04, 0.15 + Math.sin(i * 0.4) * 0.03);           // 가운데 이음매 리벳
+  for (let i = 0; i < 5; i++) add(new THREE.SphereGeometry(0.008, 6, 4), P.frame, 0.12 + i * 0.012, -0.02 - i * 0.02, 0.12);
+  // 오른쪽: 카메라 렌즈 눈
+  const barrel = add(new THREE.CylinderGeometry(0.038, 0.044, 0.07, 14), new THREE.MeshStandardMaterial({ color: 0x151515, metalness: 0.8, roughness: 0.3 }), 0.072, 0.045, 0.165); barrel.rotation.x = Math.PI / 2;
+  const lensMat = new THREE.MeshBasicMaterial({ color: 0xe8f0ff, fog: false });
+  add(new THREE.SphereGeometry(0.024, 14, 10), lensMat, 0.072, 0.045, 0.2);
+  add(new THREE.TorusGeometry(0.04, 0.006, 6, 18), P.metal, 0.072, 0.045, 0.2);
+  const piston = add(new THREE.CylinderGeometry(0.012, 0.012, 0.13, 8), P.metal, 0.15, -0.07, 0.07); piston.rotation.z = 0.5;
+  for (let i = 0; i < 4; i++) { const w = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([V(0.1 + i * 0.015, -0.1, -0.02), V(0.12 + i * 0.02, -0.2, 0), V(0.08 + i * 0.02, -0.3, -0.05)]), 6, 0.006, 4), [P.wire, P.wire, new THREE.MeshStandardMaterial({ color: 0x7a1010 }), P.wire][i]); g.add(w); }
+  // 감춰진 '귀': 가면 아래의 스피커 그물 + 붉은 불빛
+  const grille = new THREE.Group(); grille.position.set(-0.075, 0.02, 0.165); g.add(grille);
+  add(new THREE.CylinderGeometry(0.06, 0.06, 0.02, 20), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.7, roughness: 0.5 }), 0, 0, 0, grille).rotation.x = Math.PI / 2;
+  for (let r = 1; r <= 4; r++) add(new THREE.TorusGeometry(r * 0.013, 0.0025, 4, 20), P.metal, 0, 0, 0.012, grille);
+  const ledMat = new THREE.MeshBasicMaterial({ color: 0x300000, fog: false });
+  add(new THREE.SphereGeometry(0.012, 8, 6), ledMat, 0, 0, 0.016, grille);
+  // 이빨: 톱날처럼 날카로운 강철 이빨 두 줄 (윗니는 고정, 아랫니는 턱과 함께)
+  const teethRow = (par, y, z0, dirDown, n, len, rad, arcW) => { for (let i = 0; i < n; i++) { const a = (i / (n - 1) - 0.5) * arcW, t = add(new THREE.ConeGeometry(rad, len * rand(0.8, 1.15), 4), toothSteel, Math.sin(a) * 0.1, y, z0 + Math.cos(a) * 0.06 - 0.06, par); t.rotation.x = dirDown ? Math.PI : 0; t.rotation.z = rand(-0.12, 0.12); } };
+  teethRow(g, -0.082, 0.19, true, 9, 0.055, 0.018, 1.8); teethRow(g, -0.08, 0.162, true, 7, 0.042, 0.015, 1.4);
+  const throat = add(new THREE.SphereGeometry(0.075, 12, 10), dark, 0, -0.11, 0.1); throat.scale.set(1.2, 0.8, 0.9);
+  const jaw = new THREE.Group(); jaw.position.set(0, -0.08, 0.03); g.add(jaw);
+  const jawPlate = add(new THREE.SphereGeometry(0.14, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), headSteel, 0, 0.005, 0.03, jaw); jawPlate.scale.set(0.82, 0.75, 1.05);
+  teethRow(jaw, -0.005, 0.17, false, 9, 0.05, 0.018, 1.8); teethRow(jaw, -0.005, 0.142, false, 7, 0.038, 0.015, 1.4);
+  // 가면 턱 조각 (왼쪽 아래, 턱과 함께 움직인다)
+  const chin = add(new THREE.SphereGeometry(0.212, 20, 8, 0.12, Math.PI / 2 + 0.08, 1.95, 0.75), maskMat, 0, 0.08, -0.03, jaw); chin.scale.set(1, 1.1, 1.02);
+  // 가면 (왼쪽 반): 왼쪽 관자놀이에 경첩이 있어 바깥으로 쩍 열린다
+  const hinge = new THREE.Group(); hinge.position.set(-0.19, 0, 0.02); g.add(hinge);
+  const mask = new THREE.Group(); mask.position.set(0.19, 0, -0.02); hinge.add(mask);
+  const shell = add(new THREE.SphereGeometry(0.212, 26, 20, 0.1, Math.PI / 2 + 0.12, 0.18, 1.72), maskMat, 0, 0, 0, mask); shell.scale.set(1, 1.12, 1.02);
+  add(new THREE.SphereGeometry(0.03, 10, 8), dark, -0.075, 0.045, 0.185, mask).scale.set(1.2, 1.4, 0.5);                // 텅 빈 눈구멍
+  const pin = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }); add(new THREE.SphereGeometry(0.006, 6, 4), pin, -0.073, 0.043, 0.19, mask);   // 그 안의 작은 빛
+  const smile = new THREE.CatmullRomCurve3([V(0.0, -0.07, 0.212), V(-0.06, -0.06, 0.205), V(-0.12, -0.03, 0.175), V(-0.16, 0.01, 0.13)]);   // 귀까지 찢어진 웃는 입 (그림)
+  add(new THREE.TubeGeometry(smile, 16, 0.006, 5), new THREE.MeshStandardMaterial({ color: 0x3a0606, roughness: 0.4 }), 0, 0, 0, mask);
+  const tear = new THREE.CatmullRomCurve3([V(-0.075, 0.01, 0.2), V(-0.08, -0.03, 0.198), V(-0.083, -0.06, 0.19)]);
+  add(new THREE.TubeGeometry(tear, 8, 0.004, 4), new THREE.MeshStandardMaterial({ color: 0x1a1a1a }), 0, 0, 0, mask);
+  const crack = new THREE.CatmullRomCurve3([V(-0.02, 0.2, 0.08), V(-0.05, 0.12, 0.17), V(-0.03, 0.06, 0.2), V(-0.06, -0.01, 0.203)]);
+  add(new THREE.TubeGeometry(crack, 12, 0.003, 4), dark, 0, 0, 0, mask);
+  // 하얀 눈빛: 손전등처럼 앞을 훑는다
+  const beam = new THREE.SpotLight(0xdfe8ff, 0, 13, 0.32, 0.6, 1.5); beam.position.set(0.072, 0.045, 0.2); const bt = new THREE.Object3D(); bt.position.set(0.072, -0.4, 2); g.add(beam, bt); beam.target = bt;
+  let t = 0, target = 0;
+  return {
+    g, jaw, throat,
+    setMode(mode) { target = mode === 'moon' ? 1 : 0; },
+    snap(mode) { target = t = mode === 'moon' ? 1 : 0; this.update(0); },
+    update(dt) {
+      t += (target - t) * Math.min(1, dt * 9);
+      hinge.rotation.y = -t * 1.75; hinge.rotation.z = t * 0.25;                 // 가면이 쩍 열린다
+      grille.scale.setScalar(0.55 + 0.6 * t); grille.position.z = 0.165 + 0.03 * t;
+      const on = 1 - t, pulse = 0.5 + 0.5 * Math.sin(S.time * 7);
+      lensMat.color.setRGB(0.08 + 0.85 * on, 0.08 + 0.9 * on, 0.1 + 0.9 * on); pin.color.setScalar(on);
+      ledMat.color.setRGB(0.2 + 0.8 * t * pulse, 0, 0);
+      beam.intensity = 7 * on;
+    }
+  };
 }
 // 정적 모델을 괴물 코드가 쓰는 구조(body/head/arms/legs...)로 감싼다.
 // 코드가 움직이는 ud.body는 '조종용' 객체이고, 실제 모델(inner)은 그 기울기를 약하게 따라간다 (통째로 쓰러지지 않게)
@@ -2059,13 +2150,21 @@ function staticMonster(type, scale) {
   const hair = dummy(), jaw = dummy(), claw = dummy(), ext = dummy(); head.add(hair, jaw); inner.add(claw, ext);
   const mouth = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 4), new THREE.MeshBasicMaterial({ color: 0 })); mouth.visible = false; (R ? R.bones.head : head).add(mouth);
   const k = R ? 0.12 : type === 'mass' ? 1 : 0.3;
+  let MH = null;
+  if (type === 'boss' && R) {   // 반쪽 가면 머리를 머리뼈에 단다
+    MH = makeMaskHead(); const sk = new THREE.Vector3(...JOINTS.boss.skull).sub(R.J.headBase);
+    MH.g.position.copy(sk); MH.g.rotation.x = 0.35; R.bones.head.add(MH.g);
+  }
+  const useSpin = !MH;
   // 괴물 코드가 움직이는 팔/다리/머리 값을 뼈에 옮긴다 (보스는 집게팔이 -x 쪽이라 좌우를 바꿔 쓴다)
   const armL = type === 'boss' ? arms[1] : arms[0], armR = type === 'boss' ? arms[0] : arms[1];
   const poseBones = () => {
     if (!R) return; const B = R.bones;
     B.spine.rotation.set(body.rotation.x * 0.75, body.rotation.y * 0.7, body.rotation.z * 0.6);
-    B.neck.rotation.set(head.rotation.x * 0.35, (head.rotation.y + spin.rotation.y) * 0.3, head.rotation.z * 0.35);
-    B.head.rotation.set(head.rotation.x * 0.65, (head.rotation.y + spin.rotation.y) * 0.7, head.rotation.z * 0.65);
+    const sy = useSpin ? spin.rotation.y : 0;
+    B.neck.rotation.set(head.rotation.x * 0.35, (head.rotation.y + sy) * 0.3, head.rotation.z * 0.35);
+    B.head.rotation.set(head.rotation.x * 0.65, (head.rotation.y + sy) * 0.7, head.rotation.z * 0.65);
+    if (MH) { MH.jaw.rotation.x = jaw.rotation.x * 1.1; MH.update(1 / 60); }
     B.upL.rotation.set(armL.sh.rotation.x, 0, armL.sh.rotation.z * 0.5); B.foL.rotation.set(armL.fore.rotation.x * 1.2, 0, 0);
     B.upR.rotation.set(armR.sh.rotation.x, 0, armR.sh.rotation.z * 0.5); B.foR.rotation.set(armR.fore.rotation.x * 1.2, 0, 0);
     B.thL.rotation.x = legs[0].rotation.x * 0.8; B.shinL.rotation.x = knees[0].rotation.x * 0.75;
@@ -2082,7 +2181,11 @@ function staticMonster(type, scale) {
     wobble(t, a) { if (mesh.userData.animU) { mesh.userData.animU.uTime.value = t; mesh.userData.animU.uAmp.value = a; } },
     animU: mesh.userData.animU
   };
-  if (type === 'boss') { ud.reset = () => { ud.setMode('sun'); ud.reach(1); body.rotation.set(0, 0, 0); body.position.set(0, 0, 0); head.rotation.set(0, 0, 0); }; ud.onDeath = () => ud.reach(1.5); }
+  if (type === 'boss') {
+    if (MH) { ud.mouth = MH.throat; ud.screamMouth = [1.5, 2.2, 1.2]; ud.setMode = mode => { MH.setMode(mode); }; ud.maskHead = MH; ud.faceX = JOINTS.boss.skull[0]; ud.faceY = JOINTS.boss.skull[1] - 0.05; ud.faceZ = JOINTS.boss.skull[2] + 0.15; }
+    ud.reset = () => { if (MH) MH.snap('sun'); else ud.setMode('sun'); ud.reach(1); body.rotation.set(0, 0, 0); body.position.set(0, 0, 0); head.rotation.set(0, 0, 0); jaw.rotation.set(0, 0, 0); };
+    ud.onDeath = () => { ud.reach(1.5); jaw.rotation.x = 1.0; };
+  }
   if (type === 'robot') ud.onDeath = () => ud.setEyes(true);
   if (type === 'mass') ud.reset = () => { body.scale.setScalar(1); };
   if (scale) g.scale.setScalar(scale);
@@ -3790,7 +3893,8 @@ function updateBoss(m, dt, dist, pp, pt) {
   S.bossDist = m.state === 'rising' ? 99 : dist;
   // 멀리서 들리는 늘어진 오르골, 가까이선 젖은 쇳덩이 숨소리
   m.noteT -= dt;
-  if (m.noteT <= 0) { const f = DIRGE[m.noteI++ % DIRGE.length]; if (f) sfx.musicNote(head, moon ? f / 2 : f * 0.94); m.noteT = rand(0.9, 1.6); }
+  S.bossMode = m.mode;
+  if (m.noteT <= 0) { const f = DIRGE[m.noteI++ % DIRGE.length]; if (moon) sfx.radio(head); else if (f) sfx.musicNote(head, f * 0.94); m.noteT = rand(0.9, 1.6); }
   m.breathT -= dt;
   if (m.breathT <= 0) { sfx.bigBreath(head, m.state === 'chase'); m.breathT = m.state === 'chase' ? rand(0.9, 1.3) : rand(2.4, 3.4); }
   setVoice(m, head, m.state === 'chase' || m.state === 'grab' ? 0.75 : 0.35, moon ? 1.8 : 0.5);
@@ -3813,7 +3917,7 @@ function updateBoss(m, dt, dist, pp, pt) {
   }
   // 손전등에 따라 머리가 돌아간다: 해골 얼굴(본다) ↔ 꿰맨 얼굴(듣는다)
   const want = pl.flash ? 'sun' : 'moon';                    // 손전등 스위치 기준 (깜빡임엔 반응하지 않는다)
-  if (m.spinT <= 0 && want !== m.mode && m.state !== 'grab') { m.spinT = 0.8; m.nextMode = want; sfx.ratchet(head); S.glitch = Math.max(S.glitch, 0.5); }
+  if (m.spinT <= 0 && want !== m.mode && m.state !== 'grab') { m.spinT = 0.8; m.nextMode = want; if (ud.maskHead) { ud.setMode(want); sfx.maskShift(head, want === 'moon'); } else sfx.ratchet(head); S.glitch = Math.max(S.glitch, 0.5); }
   if (m.spinT > 0) {
     m.spinT -= dt;
     ud.spin.rotation.y += dt * Math.PI / 0.8 * (m.nextMode === 'moon' ? 1 : -1) * (1 + Math.sin(S.time * 40) * 0.6); // 덜컥거리며 돈다
@@ -3979,6 +4083,7 @@ function triggerDeath(m) {
   const ud = monsterMesh.userData;
   monsterMesh.visible = true; const fz = 2.6 + (ud.faceZ || 0); monsterMesh.position.set(pl.pos.x + d.x * fz, EYE - ud.faceY, pl.pos.z + d.z * fz);
   monsterMesh.rotation.set(0, Math.atan2(-d.x, -d.z), 0);
+  if (ud.faceX) { const ry = monsterMesh.rotation.y; monsterMesh.position.x -= Math.cos(ry) * ud.faceX; monsterMesh.position.z += Math.sin(ry) * ud.faceX; }
   ud.body.rotation.x = 0; ud.body.position.y = 0; ud.body.scale.setScalar(1);
   ud.mouth.scale.set(...(ud.screamMouth || [1.0, 3.2, 0.5])); setPlayingUI(false); pl.crouch = 0;
   if (ud.arms) ud.arms.forEach(a => { a.sh.rotation.x = -2.2; a.fore.rotation.x = -0.4; });
@@ -3997,6 +4102,7 @@ function updateDying(dt) {
   const monsterMesh = S.killer.mesh, ud = monsterMesh.userData;
   const lt = Math.min(1, S.deathT / 0.13), ld = 2.6 - (2.6 - 0.5) * lt * lt + (ud.faceZ || 0); // 순식간에 얼굴 앞까지 달려든다
   monsterMesh.position.set(pl.pos.x + S.lunge.x * ld, EYE - ud.faceY, pl.pos.z + S.lunge.z * ld);
+  if (ud.faceX) { const ry = monsterMesh.rotation.y; monsterMesh.position.x -= Math.cos(ry) * ud.faceX; monsterMesh.position.z += Math.sin(ry) * ud.faceX; }
   camera.fov = 72 - 14 * lt; camera.updateProjectionMatrix();
   S.glitch = Math.max(S.glitch, 0.7 * k); S.fear = 1;
   ud.head.rotation.set(rand(-0.25, 0.25), rand(-0.25, 0.25), rand(-0.6, 0.6));
