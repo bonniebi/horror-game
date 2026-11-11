@@ -632,6 +632,29 @@ const cT = texSet(512, (g, s) => {
   stains(g, s, 14, 'rgba(40,30,12,.5)', .3);
 }, null, (GW + 2) / 2);
 const ceilMat = new THREE.MeshStandardMaterial({ map: cT.map, bumpMap: cT.bump, bumpScale: 1.5, roughness: 1 });
+// 구역별 천장: 놀이방은 바랜 별·구름 페인트, 기계실은 거푸집 자국의 콘크리트, 무너진 곳은 금 가고 뚫린 콘크리트
+const ceilZoneTex = [cT,
+  texSet(512, (g, s) => {
+    g.fillStyle = '#5d6a73'; g.fillRect(0, 0, s, s); stains(g, s, 20, 'rgba(150,160,165,.25)', .3);
+    for (let i = 0; i < 5; i++) { g.fillStyle = 'rgba(200,205,205,.18)'; for (let k = 0; k < 5; k++) { g.beginPath(); g.arc(rand(0, s), rand(0, s), rand(20, 45), 0, 7); g.fill(); } }   // 구름
+    for (let i = 0; i < 26; i++) { const x = rand(0, s), y = rand(0, s), r = rand(7, 16); g.fillStyle = `rgba(${200 + rand(0, 40) | 0},${170 + rand(0, 40) | 0},70,${rand(0.25, 0.6)})`; g.beginPath();
+      for (let k = 0; k < 10; k++) { const a = k / 10 * Math.PI * 2 - Math.PI / 2, rr = k % 2 ? r * 0.45 : r; g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); } g.fill(); }        // 야광 별 스티커
+    stains(g, s, 16, 'rgba(70,52,25,.5)', .25); crackLines(g, s, 10, 'rgba(25,25,25,.6)', 1, 8, 24); speckle(g, s, .12, 5000);
+    g.globalCompositeOperation = 'source-over'; for (let i = 0; i < 6; i++) { g.fillStyle = '#7c7a70'; blob(g, rand(0, s), rand(0, s), rand(8, 20), 12, 0.8); g.fill(); }   // 벗겨진 페인트
+  }, null, 1),
+  texSet(512, (g, s) => {
+    g.fillStyle = '#55524c'; g.fillRect(0, 0, s, s); speckle(g, s, .25, 14000);
+    g.strokeStyle = 'rgba(25,24,22,.6)'; g.lineWidth = 3; for (let i = 0; i <= 4; i++) { g.beginPath(); g.moveTo(0, i * s / 4); g.lineTo(s, i * s / 4); g.stroke(); } for (let i = 0; i <= 2; i++) { g.beginPath(); g.moveTo(i * s / 2, 0); g.lineTo(i * s / 2, s); g.stroke(); }   // 거푸집 자국
+    for (let i = 0; i < 40; i++) { g.fillStyle = 'rgba(20,20,18,.5)'; g.beginPath(); g.arc(rand(0, s), rand(0, s), rand(1.5, 4), 0, 7); g.fill(); }   // 기포 구멍
+    stains(g, s, 18, 'rgba(10,10,8,.55)', .35); stains(g, s, 10, 'rgba(110,55,18,.5)', .2); drips(g, s, 20, '90,45,15', 0);
+  }, null, 1),
+  texSet(512, (g, s) => {
+    g.fillStyle = '#3f3d38'; g.fillRect(0, 0, s, s); speckle(g, s, .3, 16000); stains(g, s, 20, 'rgba(10,9,8,.6)', .3);
+    crackLines(g, s, 18, 'rgba(8,8,6,.9)', 2.5, 14, 30); crackLines(g, s, 30, 'rgba(15,14,12,.6)', 1, 6, 16);
+    for (let i = 0; i < 5; i++) { g.fillStyle = '#060605'; blob(g, rand(0, s), rand(0, s), rand(10, 26), 14, 0.9); g.fill(); }
+    stains(g, s, 8, 'rgba(70,10,8,.5)', .15);
+  }, null, 1)];
+const ceilZoneMats = ceilZoneTex.map((t, i) => i === 0 ? ceilMat : new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bump, bumpScale: 2, roughness: 1 }));
 
 function textTex(text, color, w = 512, h = 256, font = 'bold 96px serif') {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
@@ -3070,8 +3093,107 @@ function decorate(cells) {
     propBuilders[kind](g); world.add(g);
     if (kind !== 'toys') { g.updateMatrixWorld(true); props.push(new THREE.Box3().setFromObject(g)); }
   }
+  detailPass(open, faces, facePos);
 }
 
+// ── 디테일: 천장 격자·구멍·등기구·철골·덕트·철근, 벽의 콘센트·케이블 트레이·누수 얼룩, 바닥의 물웅덩이·배수구·떨어진 타일 ──
+const DT = {
+  tile: new THREE.MeshStandardMaterial({ roughness: 1, map: canvasTex(64, (g, s) => { g.fillStyle = '#5a5850'; g.fillRect(0, 0, s, s); speckle(g, s, .3, 900); stains(g, s, 4, 'rgba(60,40,15,.6)', .4); }) }),
+  dark: new THREE.MeshBasicMaterial({ color: 0x030303 }),
+  fixture: new THREE.MeshStandardMaterial({ color: 0x8c8a82, metalness: 0.4, roughness: 0.6 }),
+  diffuser: new THREE.MeshStandardMaterial({ color: 0x9a988c, roughness: 0.3, emissive: 0x0c0b08, map: canvasTex(64, (g, s) => { g.fillStyle = '#b8b5a8'; g.fillRect(0, 0, s, s); g.strokeStyle = 'rgba(60,58,50,.6)'; for (let i = 0; i < s; i += 6) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, s); g.stroke(); } stains(g, s, 5, 'rgba(40,30,10,.6)', .4); for (let i = 0; i < 3; i++) { g.fillStyle = 'rgba(15,15,10,.85)'; g.fillRect(rand(0, s), rand(0, s), 3, 5); } }) }),   // 안에 죽은 벌레
+  concrete: new THREE.MeshStandardMaterial({ color: 0x6a675f, roughness: 1, map: canvasTex(64, (g, s) => { g.fillStyle = '#6a675f'; g.fillRect(0, 0, s, s); speckle(g, s, .35, 1500); }) }),
+  plate: new THREE.MeshStandardMaterial({ color: 0xc9c3b2, roughness: 0.5 }),
+  duct: new THREE.MeshStandardMaterial({ color: 0x55534d, metalness: 0.6, roughness: 0.5, map: canvasTex(128, (g, s) => { g.fillStyle = '#6a6862'; g.fillRect(0, 0, s, s); g.strokeStyle = 'rgba(30,30,28,.5)'; for (let i = 0; i < s; i += 16) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, s); g.stroke(); } stains(g, s, 10, 'rgba(20,18,15,.6)', .3); stains(g, s, 6, 'rgba(110,55,18,.5)', .2); speckle(g, s, .2, 1500); }) }),
+  puddle: new THREE.MeshStandardMaterial({ color: 0x2a2620, roughness: 0.04, metalness: 0.1, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3,
+    alphaMap: canvasTex(128, (g, s) => { g.fillStyle = '#000'; g.fillRect(0, 0, s, s); g.fillStyle = '#fff'; for (let k = 0; k < 4; k++) { blob(g, s / 2 + rand(-20, 20), s / 2 + rand(-20, 20), rand(20, 42), 18, 0.5); g.fill(); } }) }),
+  grate: new THREE.MeshStandardMaterial({ color: 0x2a2724, metalness: 0.7, roughness: 0.5, transparent: true, alphaTest: 0.5,
+    map: canvasTex(64, (g, s) => { g.clearRect(0, 0, s, s); g.fillStyle = '#3a3530'; g.beginPath(); g.arc(s / 2, s / 2, s / 2 - 1, 0, 7); g.fill(); g.fillStyle = 'rgba(0,0,0,1)'; g.globalCompositeOperation = 'destination-out'; for (let i = 10; i < s - 8; i += 7) g.fillRect(12, i, s - 24, 3.5); g.globalCompositeOperation = 'source-over'; stains(g, s, 3, 'rgba(110,50,15,.6)', .4); }) }),
+  leak: new THREE.MeshStandardMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, roughness: 0.6,
+    map: canvasTex(128, (g, s) => { g.clearRect(0, 0, s, s); const gr = g.createLinearGradient(0, 0, 0, s); gr.addColorStop(0, 'rgba(60,42,18,.75)'); gr.addColorStop(1, 'rgba(60,42,18,0)'); g.fillStyle = gr;
+      g.beginPath(); g.moveTo(s * .2, 0); g.lineTo(s * .8, 0); g.lineTo(s * .6, s * .25); g.lineTo(s * .55, s); g.lineTo(s * .45, s); g.lineTo(s * .4, s * .25); g.fill();
+      for (let i = 0; i < 7; i++) { const x = rand(s * .25, s * .75); g.fillRect(x, 0, rand(1, 3), rand(s * .3, s)); } }) }),
+};
+function detailPass(open, faces, facePos) {
+  const zone = STAGES[S.stage].zone, dm = new THREE.Object3D(), Y = WALL_H;
+  const shuffle = a => a.sort(() => Math.random() - .5), pick = (a, n) => shuffle(a.slice()).slice(0, n);
+  const inst = (geo, mat, list, set, shadow = false) => { if (!list.length) return; const im = new THREE.InstancedMesh(geo, mat, list.length);
+    list.forEach((it, i) => { dm.position.set(0, 0, 0); dm.rotation.set(0, 0, 0); dm.scale.set(1, 1, 1); set(it, dm, i); dm.updateMatrix(); im.setMatrixAt(i, dm.matrix); });
+    im.castShadow = shadow; im.receiveShadow = true; world.add(im); };
+  const add = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); m.receiveShadow = true; world.add(m); return m; };
+  const corridor = t => !isWallTile(t.x - 1, t.z) && !isWallTile(t.x + 1, t.z) ? 'x' : !isWallTile(t.x, t.z - 1) && !isWallTile(t.x, t.z + 1) ? 'z' : null;
+  const holes = [];
+  // ── 천장 ──
+  if (zone === 0) {   // 병동: 입체 T바 격자 (텍스처의 타일 칸과 맞춘다)
+    const bars = []; for (const t of open) for (let k = 0; k < 2; k++) { bars.push({ t, k, ax: 'x' }); bars.push({ t, k, ax: 'z' }); }
+    inst(new THREE.BoxGeometry(TILE, 0.028, 0.03), P.metal, bars, (b, d) => { const c = tileCenter(b.t.x, b.t.z), o = -TILE / 2 + b.k * TILE / 2;
+      if (b.ax === 'x') d.position.set(c.x, Y - 0.014, c.z + o); else { d.position.set(c.x + o, Y - 0.014, c.z); d.rotation.y = Math.PI / 2; } });
+  }
+  if (zone === 0 || zone === 1 || zone === 3) {   // 빠진 천장 칸 / 뚫린 구멍: 어둠 + 덜렁 매달린 조각 + 늘어진 전선
+    for (const t of pick(open, Math.round(open.length * (zone === 3 ? 0.16 : 0.1)))) {
+      const c = tileCenter(t.x, t.z), qx = (Math.random() < .5 ? -1 : 1) * TILE / 4, qz = (Math.random() < .5 ? -1 : 1) * TILE / 4, hs = zone === 3 ? rand(0.6, 1.1) : TILE / 2 - 0.04;
+      add(new THREE.PlaneGeometry(hs, hs), DT.dark, c.x + qx, Y - 0.006, c.z + qz, Math.PI / 2);
+      holes.push({ x: c.x + qx, z: c.z + qz, hs });
+      if (zone !== 3 && Math.random() < 0.7) {   // 한쪽 모서리만 걸려 축 늘어진 천장 타일
+        const hg = new THREE.Group(); hg.position.set(c.x + qx - hs / 2, Y - 0.02, c.z + qz); hg.rotation.z = -rand(0.7, 1.3); world.add(hg);
+        const ts = Math.min(hs, 0.62), tl = new THREE.Mesh(new THREE.BoxGeometry(ts, 0.018, ts), DT.tile); tl.position.x = ts / 2; tl.castShadow = true; hg.add(tl);
+      }
+      for (let k = 0; k < 2; k++) { const x0 = c.x + qx + rand(-0.2, 0.2), z0 = c.z + qz + rand(-0.2, 0.2), L = rand(0.4, 1.1);
+        const w = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(x0, Y + 0.1, z0), new THREE.Vector3(x0 + rand(-0.15, 0.15), Y - L * 0.6, z0 + rand(-0.15, 0.15)), new THREE.Vector3(x0 + rand(-0.3, 0.3), Y - L, z0 + rand(-0.3, 0.3))]), 8, 0.01, 4), P.wire); world.add(w); }
+      if (zone === 3) for (let k = 0; k < 4; k++) add(new THREE.CylinderGeometry(0.009, 0.009, rand(0.3, 0.9), 5), P.pipe, c.x + qx + rand(-hs, hs) * 0.4, Y - 0.25, c.z + qz + rand(-hs, hs) * 0.4, rand(-0.5, 0.5), 0, rand(-0.5, 0.5));   // 삐져나온 철근
+    }
+  }
+  if (zone === 0 || zone === 1) {   // 꺼진 형광등 기구 + 스프링클러/화재감지기
+    for (const t of pick(open, Math.round(open.length * 0.22))) {
+      const c = tileCenter(t.x, t.z), ax = corridor(t) === 'z' ? Math.PI / 2 : 0, g = new THREE.Group(); g.position.set(c.x, Y - 0.04, c.z); g.rotation.y = ax; world.add(g);
+      const box = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.07, 0.32), DT.fixture); g.add(box);
+      const dif = new THREE.Mesh(new THREE.PlaneGeometry(1.12, 0.26), DT.diffuser); dif.rotation.x = Math.PI / 2; dif.position.y = -0.036; g.add(dif);
+      if (Math.random() < 0.25) { g.rotation.z = rand(0.15, 0.35); g.position.y -= 0.12; }   // 한쪽이 떨어져 기울었다
+    }
+    const sp = pick(open, Math.round(open.length * 0.3));
+    inst(new THREE.CylinderGeometry(0.035, 0.02, 0.05, 10), P.metal, sp, (t, d) => { const c = tileCenter(t.x, t.z); d.position.set(c.x + rand(-0.8, 0.8), Y - 0.025, c.z + rand(-0.8, 0.8)); });
+  }
+  if (zone === 2) {   // 기계실: 복도를 가로지르는 철골 I빔 + 복도를 따라가는 큰 환기 덕트
+    const beams = open.filter(t => corridor(t));
+    for (const [w, h, yo] of [[0.16, 0.025, 0.012], [0.16, 0.025, 0.268], [0.025, 0.26, 0.14]])
+      inst(new THREE.BoxGeometry(w, h, TILE), P.pipe, beams, (t, d) => { const c = tileCenter(t.x, t.z); d.position.set(c.x, Y - yo, c.z); if (corridor(t) === 'z') d.rotation.y = Math.PI / 2; }, true);
+    const ducts = beams.filter(() => Math.random() < 0.7);
+    inst(new THREE.BoxGeometry(TILE, 0.3, 0.46), DT.duct, ducts, (t, d) => { const c = tileCenter(t.x, t.z), along = corridor(t) === 'x';
+      d.position.set(c.x + (along ? 0 : 0.62), Y - 0.45, c.z + (along ? 0.62 : 0)); if (!along) d.rotation.y = Math.PI / 2; }, true);
+    inst(new THREE.BoxGeometry(0.05, 0.34, 0.5), P.frame, ducts, (t, d) => { const c = tileCenter(t.x, t.z), along = corridor(t) === 'x';   // 덕트 이음 띠
+      d.position.set(c.x + (along ? TILE / 2 - 0.03 : 0.62), Y - 0.45, c.z + (along ? 0.62 : TILE / 2 - 0.03)); if (!along) d.rotation.y = Math.PI / 2; });
+  }
+  if (zone === 3) {   // 무너진 곳: 천장에 매달린 콘크리트 덩어리
+    inst(new THREE.DodecahedronGeometry(1, 0), DT.concrete, pick(open, Math.round(open.length * 0.2)), (t, d) => { const c = tileCenter(t.x, t.z);
+      d.position.set(c.x + rand(-0.9, 0.9), Y - rand(0.05, 0.2), c.z + rand(-0.9, 0.9)); d.rotation.set(rand(0, 3), rand(0, 3), rand(0, 3)); d.scale.set(rand(0.15, 0.35), rand(0.1, 0.22), rand(0.15, 0.35)); }, true);
+  }
+  // ── 벽 ──
+  if (zone === 0 || zone === 1) {   // 콘센트·스위치
+    const fs = pick(faces, Math.round(faces.length * 0.3));
+    inst(new THREE.BoxGeometry(0.08, 0.12, 0.012), DT.plate, fs, (f, d) => { d.position.copy(facePos(f, 0.006, rand(-0.8, 0.8), Math.random() < 0.6 ? 0.32 : 1.25)); d.rotation.y = Math.atan2(-f.dx, -f.dz); });
+  }
+  if (zone === 2) {   // 케이블 트레이 + 굵은 케이블
+    const fs = faces.filter(() => Math.random() < 0.6);
+    inst(new THREE.BoxGeometry(TILE, 0.025, 0.26), P.metal, fs, (f, d) => { d.position.copy(facePos(f, 0.13, 0, 2.38)); d.rotation.y = f.dx ? Math.PI / 2 : 0; }, true);
+    for (const k of [0, 1, 2]) inst(new THREE.CylinderGeometry(0.022, 0.022, TILE, 6), P.wire, fs, (f, d) => { d.position.copy(facePos(f, 0.07 + k * 0.06, 0, 2.415)); d.rotation.set(f.dx ? Math.PI / 2 : 0, 0, f.dx ? 0 : Math.PI / 2); });
+  }
+  if (zone === 3) {   // 벽에서 삐져나온 철근
+    const fs = pick(faces, Math.round(faces.length * 0.25));
+    for (const k of [0, 1]) inst(new THREE.CylinderGeometry(0.01, 0.01, 0.35, 5), P.pipe, fs, (f, d) => { d.position.copy(facePos(f, -0.05, rand(-0.8, 0.8), rand(0.4, 2.4))); d.rotation.set(Math.PI / 2 + rand(-0.4, 0.4), Math.atan2(-f.dx, -f.dz), rand(-0.4, 0.4)); });
+  }
+  for (const f of pick(faces, Math.round(faces.length * 0.12))) {   // 천장에서 흘러내린 누수 얼룩
+    const h = rand(1.4, 2.6), m = add(new THREE.PlaneGeometry(rand(0.6, 1.1), h), DT.leak, 0, 0, 0);
+    m.position.copy(facePos(f, 0.013 + Math.random() * 0.004, rand(-0.7, 0.7), Y - h / 2)); m.rotation.y = Math.atan2(-f.dx, -f.dz);
+  }
+  // ── 바닥 ──
+  const pud = pick(open, Math.round(open.length * (zone >= 2 ? 0.14 : 0.08)));
+  inst(new THREE.PlaneGeometry(1, 1), DT.puddle, pud, (t, d) => { const c = tileCenter(t.x, t.z), k = rand(0.8, 1.8); d.position.set(c.x + rand(-0.6, 0.6), 0.006, c.z + rand(-0.6, 0.6)); d.rotation.set(-Math.PI / 2, 0, rand(0, 6.3)); d.scale.set(k, k * rand(0.6, 1), 1); });
+  if (zone === 0 || zone === 2) inst(new THREE.PlaneGeometry(0.42, 0.42), DT.grate, pick(open, Math.round(open.length * 0.07)), (t, d) => { const c = tileCenter(t.x, t.z); d.position.set(c.x + rand(-0.7, 0.7), 0.007, c.z + rand(-0.7, 0.7)); d.rotation.set(-Math.PI / 2, 0, 0); });
+  for (const h of holes) {   // 구멍 아래로 떨어진 천장 조각
+    for (let k = 0; k < (zone === 3 ? 6 : 3); k++) { const piece = add(zone === 3 ? new THREE.DodecahedronGeometry(rand(0.06, 0.16), 0) : new THREE.BoxGeometry(rand(0.15, 0.4), 0.018, rand(0.15, 0.4)), zone === 3 ? DT.concrete : DT.tile,
+      h.x + rand(-0.5, 0.5), zone === 3 ? 0.06 : 0.012, h.z + rand(-0.5, 0.5), rand(-0.12, 0.12), rand(0, 6.3), rand(-0.12, 0.12)); piece.castShadow = true; }
+  }
+}
 let world = null, items = [], lamps = [], exitDoor = null, exitBlock = null, exitSignMat = null, exitLight = null, shutter = null;
 // 마지막 문 위의 철제 셔터: 골진 강판, 녹, 아래쪽 경고 띠, "비상 셔터" 글씨
 const shutterT = texSet(256, (g, s) => {
@@ -3138,7 +3260,8 @@ function buildWorld() {
       im.receiveShadow = true; world.add(im);
     }));
   }
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(size, size), ceilMat);
+  ceilZoneTex.slice(1).forEach(t => [t.map, t.bump].forEach(m => m.repeat.set((GW + 2) / 2, (GW + 2) / 2)));
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(size, size), ceilZoneMats[ST.zone]);
   ceil.rotation.x = Math.PI / 2; ceil.position.set(GW * TILE / 2, WALL_H, GH * TILE / 2); ceil.receiveShadow = true; world.add(ceil);
 
   // 벽 (인스턴싱)
