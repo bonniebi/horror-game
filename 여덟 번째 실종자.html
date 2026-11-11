@@ -2214,26 +2214,28 @@ function makeMaskHead() {
   const gearMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0x8a6a40, metalness: 0.85, roughness: 0.45 });
   const gearsG = new THREE.Group(), GP = headPt(...HOLE, 0.8); gearsG.position.copy(GP); gearsG.lookAt(GP.clone().multiplyScalar(2)); g.add(gearsG);
   const gears = [[0, 0, 0.05, 14, 1], [0.072, 0.02, 0.03, 9, -14 / 9], [-0.05, 0.045, 0.026, 8, -14 / 8]].map(([x, y, r, n, sp]) => { const m = add(gearGeo(r, n, 0.012), gearMat, x, y, 0.01, gearsG); m.userData.sp = sp; return m; });
-  const cables = [];
-  for (let i = 0; i < 11; i++) {
-    const ang = (i / 10 - 0.5) * 2.2, d0 = V(HOLE[0] + Math.sin(ang) * 0.25, HOLE[1] - 0.05, HOLE[2] + Math.cos(ang) * 0.1), base = headPt(d0.x, d0.y, d0.z, 0.92);
-    const sx = Math.sin(ang) * 0.12, L = rand(0.85, 1.15);
-    const pts = [V(0, 0, 0), V(sx * 0.3, 0.06, -0.03), V(sx * 0.8, 0.04, -0.13), V(sx * 1.2, -0.12, -0.2), V(sx * 1.4, -0.32, -0.17), V(sx * 1.5 + rand(-0.03, 0.03), -0.52, -0.1)].map(p => p.multiplyScalar(L));
+  // 정수리 구멍에서 짧고 뻣뻣하게 끊어진 전선 몇 가닥 + 끝에서 튀는 불꽃
+  const cables = [], sparks = [];
+  const sparkTex = canvasTex(64, (c, s) => { const gr = c.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.2, 'rgba(255,255,255,.6)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = gr; c.fillRect(0, 0, s, s); });
+  const copper = new THREE.MeshStandardMaterial({ color: 0xc87a3a, metalness: 1, roughness: 0.3 });
+  for (let i = 0; i < 6; i++) {
+    const ang = (i / 5 - 0.5) * 2.4, d0 = V(HOLE[0] + Math.sin(ang) * 0.2, HOLE[1], HOLE[2] + Math.cos(ang) * 0.12), base = headPt(d0.x, d0.y, d0.z, 0.9);
+    const out = d0.clone().normalize(), side = V(rand(-1, 1), rand(-0.3, 0.3), rand(-1, 1)).multiplyScalar(0.025), L = rand(0.05, 0.1);
+    const pts = [V(0, 0, 0), out.clone().multiplyScalar(L * 0.45).add(side), out.clone().multiplyScalar(L).add(side.clone().multiplyScalar(2.2)).add(V(0, -L * 0.25 * Math.random(), 0))];
     const cg = new THREE.Group(); cg.position.copy(base); g.add(cg);
-    add(taperTube(new THREE.CatmullRomCurve3(pts), 24, rand(0.007, 0.012), 0.005, 6), i % 4 === 1 ? new THREE.MeshStandardMaterial({ color: 0x5a0d0d, roughness: 0.5 }) : P.wire, 0, 0, 0, cg);
-    if (i % 3 === 0) { const tip = pts[pts.length - 1]; add(new THREE.CylinderGeometry(0.009, 0.006, 0.025, 8), toothSteel, tip.x, tip.y - 0.01, tip.z, cg); }   // 끊어진 단자
+    add(taperTube(new THREE.CatmullRomCurve3(pts), 10, 0.0055, 0.0045, 6), i % 3 === 1 ? new THREE.MeshStandardMaterial({ color: 0x5a0d0d, roughness: 0.5 }) : P.wire, 0, 0, 0, cg);
+    const tip = pts[2];
+    for (let k = 0; k < 3; k++) { const f = add(new THREE.CylinderGeometry(0.0012, 0.0012, 0.014, 4), copper, tip.x + rand(-0.003, 0.003), tip.y + rand(-0.002, 0.004), tip.z + rand(-0.003, 0.003), cg); f.rotation.set(rand(-0.8, 0.8), 0, rand(-0.8, 0.8)); }   // 삐져나온 구리선
+    if (i % 2 === 0) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: sparkTex, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true, color: 0x9fd0ff })); sp.position.copy(tip); sp.scale.setScalar(0.0001); cg.add(sp); sparks.push({ sp, t: rand(0, 3) }); }
     cables.push({ cg, ph: rand(0, 6) });
   }
-  // 햇살 대신: 두개골 안에서 바깥으로 박아 넣은 녹슨 대못 (가면 쪽 둘레와 정수리)
-  const sunG = new THREE.Group(); g.add(sunG);
+  // 두개골에 박아 넣은 짧은 못 몇 개 (머리만 빠끔히)
   const sunMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0x6e5c4a, metalness: 0.7, roughness: 0.6 });
   const rays = [];
-  for (let k = 0; k < 15; k++) {
-    const a = THREE.MathUtils.degToRad(70 + k * 13 + rand(-4, 4)), dir = V(Math.cos(a), Math.sin(a), rand(-0.35, -0.05)).normalize();
-    const base = headPt(dir.x, dir.y, dir.z, 1, -0.03), len = rand(0.09, 0.2) * (k % 4 === 2 ? 0.55 : 1);
-    const piv = new THREE.Group(); piv.position.copy(base); piv.quaternion.setFromUnitVectors(V(0, 1, 0), dir.clone().add(V(rand(-0.25, 0.25), rand(-0.2, 0.2), rand(-0.2, 0.1))).normalize()); sunG.add(piv);
-    const sp = new THREE.ConeGeometry(rand(0.006, 0.01), len, 6); sp.translate(0, len / 2, 0);
-    rays.push(add(sp, sunMat, 0, 0, 0, piv));
+  for (const [x, y, z] of [[0.55, 0.55, 0.35], [0.35, 0.75, 0.1], [0.75, 0.35, -0.2], [-0.3, 0.85, -0.1], [0.6, -0.05, 0.55]]) {
+    const dir = V(x, y, z).normalize(), base = headPt(dir.x, dir.y, dir.z, 1, -0.005), piv = new THREE.Group(); piv.position.copy(base);
+    piv.quaternion.setFromUnitVectors(V(0, 1, 0), dir.clone().add(V(rand(-0.4, 0.4), rand(-0.2, 0.2), rand(-0.4, 0.4))).normalize()); g.add(piv);
+    add(new THREE.CylinderGeometry(0.003, 0.003, 0.03, 6), sunMat, 0, 0.008, 0, piv); add(new THREE.CylinderGeometry(0.008, 0.008, 0.003, 10), sunMat, 0, 0.023, 0, piv);   // 몸통 + 납작한 못머리
   }
   // 초승달 대신: 안쪽이 톱날인 녹슨 낫
   const moonG = new THREE.Group(); moonG.position.set(0, -0.01, -0.07); g.add(moonG);
@@ -2292,10 +2294,10 @@ function makeMaskHead() {
       pinGlow.material.color.setRGB(0.5 * on + t * (0.4 + 0.6 * pulse), 0.5 * on, 0.55 * on); pinGlow.scale.setScalar(0.05 + 0.05 * t);
       lensGlow.material.color.setRGB(0.8 * on, 0.85 * on, 0.95 * on);
       beam.intensity = 7 * on;
-      rays.forEach((r, i) => { r.scale.y = 0.35 + 0.65 * on; });                    // 대못이 쑥 튀어나온다 / 들어간다
       moonG.rotation.z = -t * 0.55; moonG.position.z = -0.07 + 0.05 * t; moonMat.emissive.setRGB(0.06 * t * (0.4 + 0.6 * pulse), 0, 0);
       const ag = this.agit || 0.3; gears.forEach(m => { m.rotation.z += dt * m.userData.sp * (1 + ag * 4); });
-      cables.forEach(o => { o.cg.rotation.x = Math.sin(S.time * (2 + ag * 5) + o.ph) * 0.1 * ag; o.cg.rotation.z = Math.sin(S.time * (1.7 + ag * 4) + o.ph * 1.7) * 0.08 * ag; });
+      cables.forEach(o => { o.cg.rotation.x = Math.sin(S.time * (5 + ag * 8) + o.ph) * 0.05 * ag; });
+      sparks.forEach(o => { o.t -= dt; if (o.t <= 0) o.t = rand(0.6, 2.5) / (0.5 + ag); const on2 = o.t < 0.08; o.sp.scale.setScalar(on2 ? rand(0.03, 0.06) : 0.0001); });   // 파지직
     }
   };
 }
