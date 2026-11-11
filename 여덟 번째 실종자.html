@@ -964,6 +964,12 @@ sfx.radio = pos => {
   if (!ac) return; const t = ac.currentTime, p = panner(pos); p.refDistance = 2.5; out(p, 0.3);
   const n = noiseSrc(), bp = filt('bandpass', rand(900, 2200), 3), am = amGain(rand(8, 20), 0.8), g = envGain(t, 0.05, 0.22, rand(0.4, 0.9)); n.connect(bp); bp.connect(am); am.connect(g); g.connect(p); n.start(t); n.stop(t + 1);
 };
+// 광대 모자의 녹슨 방울: 딸랑… 어둠 속에서 위치를 알려 준다
+sfx.bells = (pos, n = 3) => {
+  if (!ac) return; const t = ac.currentTime, p = panner(pos); p.refDistance = 3; out(p, 0.22);
+  for (let i = 0; i < n; i++) { const tk = t + i * rand(0.05, 0.11), f = rand(2300, 3400) * (Math.random() < 0.3 ? 0.71 : 1);
+    for (const [m, a] of [[1, 0.5], [2.76, 0.25], [5.4, 0.12]]) { const o = osc('sine', f * m * rand(0.99, 1.01)), g = envGain(tk, 0.002, a, rand(0.25, 0.5)); o.connect(g); g.connect(p); o.start(tk); o.stop(tk + 0.6); } }
+};
 // 녹슨 경첩이 삐걱이는 소리 (문, 사물함)
 sfx.creak = pos => {
   if (!ac) return; const t = ac.currentTime, p = panner(pos); p.refDistance = 2; out(p, 0.4);
@@ -2117,6 +2123,26 @@ const maskTex = texSet(256, (c, s) => {
 const maskMat = new THREE.MeshStandardMaterial({ map: maskTex.map, bumpMap: maskTex.bump, bumpScale: 0.6, color: 0xd6d0c4, roughness: 0.25, metalness: 0.02, vertexColors: true });
 const grilleTex = canvasTex(128, (c, s) => { c.fillStyle = '#fff'; c.fillRect(0, 0, s, s); c.fillStyle = '#000'; for (let y = 6; y < s; y += 11) for (let x = 6 + (y / 11 % 2) * 5; x < s; x += 11) { c.beginPath(); c.arc(x, y, 3.4, 0, 7); c.fill(); } });
 const maskInner = new THREE.MeshStandardMaterial({ color: 0x2a2622, roughness: 0.9, side: THREE.BackSide });
+// 가늘어지는 천 꼬리 (광대 모자 끝)
+function taperTube(curve, segs, r0, r1, rad = 10) {
+  const fr = curve.computeFrenetFrames(segs, false), pos = [], uv = [], idx = [], P = new THREE.Vector3();
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs; curve.getPointAt(t, P); const N = fr.normals[i], B = fr.binormals[i];
+    for (let j = 0; j <= rad; j++) { const a = j / rad * Math.PI * 2, r = (r0 + (r1 - r0) * Math.pow(t, 0.7)) * (1 + 0.14 * Math.sin(t * 31 + a * 3) * (1 - t));
+      pos.push(P.x + (N.x * Math.cos(a) + B.x * Math.sin(a)) * r, P.y + (N.y * Math.cos(a) + B.y * Math.sin(a)) * r, P.z + (N.z * Math.cos(a) + B.z * Math.sin(a)) * r); uv.push(j / rad * 2, t * 3); }
+  }
+  for (let i = 0; i < segs; i++) for (let j = 0; j < rad; j++) { const a = i * (rad + 1) + j, b = a + rad + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals(); return g;
+}
+const jesterTex = canvasTex(256, (c, s) => {
+  const n = 4, w = s / n;
+  for (let i = -1; i <= n; i++) for (let j = -1; j <= n * 2; j++) { c.fillStyle = (i + j) % 2 ? '#4a1010' : '#7a6e58'; c.beginPath(); const x = (i + (j % 2) * 0.5) * w, y = j * w / 2; c.moveTo(x, y - w / 2); c.lineTo(x + w / 2, y); c.lineTo(x, y + w / 2); c.lineTo(x - w / 2, y); c.fill(); }
+  speckle(c, s, .15, 4000); stains(c, s, 22, 'rgba(35,25,12,.7)', .3); stains(c, s, 8, 'rgba(70,0,0,.75)', .2); drips(c, s, 18, '50,25,8', 0); drips(c, s, 8, '80,0,0', s * 0.3);
+  crackLines(c, s, 8, 'rgba(20,15,10,.7)', 1.5, 6, 14);
+  c.globalCompositeOperation = 'destination-out'; for (let i = 0; i < 7; i++) { blob(c, rand(0, s), rand(0, s), rand(5, 14), 12, 0.7); c.fill(); } c.globalCompositeOperation = 'source-over';
+});
+const jesterMat = new THREE.MeshStandardMaterial({ map: jesterTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.95 });
+const bellMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0xb08a3a, metalness: 0.9, roughness: 0.35 });
 function makeMaskHead() {
   const g = new THREE.Group(), add = (geo, mat, x, y, z, par = g) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; par.add(m); return m; };
   const MOUTH = -0.43;                                     // 입 선 (방향 y)
@@ -2187,12 +2213,47 @@ function makeMaskHead() {
     const rouge = hd(d, -0.5, -0.2, 0.84, 0.13); c[1] *= 1 - 0.35 * rouge; c[2] *= 1 - 0.3 * rouge;
     const grime = Math.max(0, Math.min(1, (d.x + 0.05) * 8)) * 0.35 + Math.max(0, -d.z) * 0.6; c[0] *= 1 - grime; c[1] *= 1 - grime; c[2] *= 1 - grime * 1.05;
   };
-  const maskGeo = headShell(150, maskR, maskCol, d => maskEdge(d) && d.y > MOUTH + 0.02 && d.z > -0.4 && d.y < 0.97
+  const maskGeo = headShell(150, maskR, maskCol, d => maskEdge(d) && d.y > MOUTH + 0.02 && d.z > -0.4 && d.y < 0.62
     && Math.hypot(d.x - EYE_L[0], d.y - EYE_L[1], d.z - EYE_L[2]) > 0.11 && !CHIPS.some(k => Math.hypot(d.x - k[0], d.y - k[1], d.z - k[2]) < k[3] * (0.8 + 0.4 * Math.sin(d.x * 90 + d.y * 70))));
   const HP = V(-0.165, 0.0, -0.05), hinge = new THREE.Group(); hinge.position.copy(HP); g.add(hinge);
   const mask = new THREE.Group(); mask.position.copy(HP).negate(); hinge.add(mask);
   add(maskGeo, maskMat, 0, 0, 0, mask); add(maskGeo, maskInner, 0, 0, 0, mask);
   const pin = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }); const pp = headPt(...EYE_L, 1, 0.02); add(new THREE.SphereGeometry(0.0045, 8, 6), pin, pp.x, pp.y, pp.z, mask);   // 가면 눈구멍 속 작은 빛
+  // 찢어진 광대 모자: 두개골에 눌러 쓴 천 + 축 늘어진 세 갈래 끝, 끝마다 녹슨 방울
+  const brim = d => { const az = Math.atan2(d.x, d.z); return (d.z > 0 ? 0.44 : 0.12 + 0.3 * Math.max(0, d.z + 0.3)) + 0.05 * Math.sin(az * 9) + 0.03 * Math.sin(az * 23 + 1); };
+  const hatR = d => headBase(d) + 0.11 + 0.035 * Math.sin(Math.atan2(d.x, d.z) * 5) * Math.max(0, d.y) + 0.06 * Math.max(0, d.y - 0.6);
+  const hatCol = (d, c) => { const k = Math.max(0.35, Math.min(1, (d.y - brim(d)) * 5 + 0.4)); c[0] = c[1] = c[2] = k; };
+  const hatGeo = headShell(110, hatR, hatCol, d => d.y > brim(d));
+  const hat = add(hatGeo, new THREE.MeshStandardMaterial({ map: jesterTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.95, vertexColors: true }), 0, 0, 0);
+  const tails = [];
+  for (const [dx, dy, dz, len] of [[-0.8, 0.55, -0.15, 1], [0.8, 0.55, -0.15, 0.9], [-0.05, 0.75, -0.65, 1.15]]) {
+    const dir = new THREE.Vector3(dx, dy, dz).normalize(), base = headPt(dx, dy, dz, 1, 0.08), out = new THREE.Vector3(dx, 0, dz).normalize(), up = V(0, 1, 0);
+    const pts = [V(0, 0, 0), out.clone().multiplyScalar(0.05).addScaledVector(up, 0.09), out.clone().multiplyScalar(0.14).addScaledVector(up, 0.13), out.clone().multiplyScalar(0.22).addScaledVector(up, 0.06), out.clone().multiplyScalar(0.25).addScaledVector(up, -0.08), out.clone().multiplyScalar(0.24).addScaledVector(up, -0.2)].map(p => p.multiplyScalar(len));
+    const tg = new THREE.Group(); tg.position.copy(base); g.add(tg);
+    add(taperTube(new THREE.CatmullRomCurve3(pts), 28, 0.05, 0.007), jesterMat, 0, 0, 0, tg);
+    const tip = pts[pts.length - 1], bell = add(new THREE.SphereGeometry(0.019, 14, 10), bellMat, tip.x, tip.y - 0.016, tip.z, tg);
+    add(new THREE.TorusGeometry(0.008, 0.003, 6, 12), new THREE.MeshBasicMaterial({ color: 0x050505 }), 0, -0.012, 0, bell).rotation.x = Math.PI / 2;
+    tails.push({ tg, ph: rand(0, 6), out });
+  }
+  // 썬/문 왕관: 가면 쪽엔 부서진 햇살 칼날, 강철 쪽엔 초승달
+  const sunG = new THREE.Group(); sunG.position.set(0, -0.01, -0.06); g.add(sunG);
+  const sunMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0x8a6a30, metalness: 0.9, roughness: 0.45, emissive: 0x000000 });
+  const rays = [];
+  for (let k = 0; k < 11; k++) {
+    const a = THREE.MathUtils.degToRad(105 + k * 15), len = (k % 2 ? 0.075 : 0.12) * rand(0.8, 1.1) * (k === 3 || k === 8 ? 0.5 : 1);
+    const piv = new THREE.Group(); piv.rotation.z = a - Math.PI / 2; sunG.add(piv);
+    const bl = new THREE.ConeGeometry(0.024, len, 4); bl.translate(0, len / 2, 0); bl.scale(1, 1, 0.3);
+    const m = add(bl, sunMat, 0, 0.205, 0, piv); rays.push(m);
+  }
+  add(new THREE.TorusGeometry(0.205, 0.009, 8, 40, Math.PI * 0.86), sunMat, 0, 0, 0, sunG).rotation.z = THREE.MathUtils.degToRad(103);
+  const moonG = new THREE.Group(); moonG.position.set(0, -0.01, -0.07); g.add(moonG);
+  const cres = new THREE.Shape(), A0 = -1.35, A1 = 1.0, CN = 30;
+  for (let i = 0; i <= CN; i++) { const a = A0 + (A1 - A0) * i / CN; (i ? cres.lineTo : cres.moveTo).call(cres, Math.cos(a) * 0.3, Math.sin(a) * 0.3); }
+  for (let i = CN; i >= 0; i--) { const a = A0 + (A1 - A0) * i / CN, th = 0.085 * Math.sin(Math.PI * i / CN); cres.lineTo(Math.cos(a) * (0.3 - th), Math.sin(a) * (0.3 - th)); }
+  const moonMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0x8a919c, metalness: 0.55, roughness: 0.5, emissive: 0x000000 });
+  const moonGeo = new THREE.ExtrudeGeometry(cres, { depth: 0.014, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 2, curveSegments: 4 }); moonGeo.translate(0, 0, -0.007); { const uv = moonGeo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 3 + 0.5, uv.getY(i) * 3 + 0.5); }
+  add(moonGeo, moonMat, 0, 0, 0, moonG);
+  for (let i = 1; i < 6; i++) { const a = A0 + (A1 - A0) * i / 6, r = 0.3 - 0.085 * Math.sin(Math.PI * i / 6) / 2; add(new THREE.SphereGeometry(0.006, 8, 6), toothSteel, Math.cos(a) * r, Math.sin(a) * r, 0.012, moonG); }
   // 하얀 눈빛: 손전등처럼 앞을 훑는다
   const beam = new THREE.SpotLight(0xdfe8ff, 0, 13, 0.32, 0.6, 1.5); beam.position.copy(eyeR); const bt = new THREE.Object3D(); bt.position.set(eyeR.x, -0.4, 2); g.add(beam, bt); beam.target = bt;
   let t = 0, target = 0;
@@ -2208,6 +2269,10 @@ function makeMaskHead() {
       lensMat.color.setRGB(0.08 + 0.85 * on, 0.08 + 0.9 * on, 0.1 + 0.9 * on); pin.color.setScalar(on);
       ledMat.color.setRGB(0.2 + 0.8 * t * pulse, 0, 0);
       beam.intensity = 7 * on;
+      sunG.rotation.z = Math.sin(S.time * 0.9) * 0.08 * on; rays.forEach((r, i) => { r.scale.y = 0.3 + 0.7 * on + 0.06 * Math.sin(S.time * 5 + i) * on; });
+      sunMat.emissive.setRGB(0.1 * on, 0.055 * on, 0.01 * on);
+      moonG.rotation.z = -t * 0.55; moonG.position.z = -0.07 + 0.05 * t; moonMat.emissive.setRGB(0.06 * t * (0.4 + 0.6 * pulse), 0, 0);
+      const ag = this.agit || 0.3; tails.forEach(o => { o.tg.rotation.z = Math.sin(S.time * (3 + ag * 6) + o.ph) * 0.12 * ag * Math.sign(o.out.x || 1); o.tg.rotation.x = Math.sin(S.time * (2.3 + ag * 5) + o.ph * 2) * 0.1 * ag; });
     }
   };
 }
@@ -4005,6 +4070,10 @@ function updateBoss(m, dt, dist, pp, pt) {
   m.noteT -= dt;
   S.bossMode = m.mode;
   if (m.noteT <= 0) { const f = DIRGE[m.noteI++ % DIRGE.length]; if (moon) sfx.radio(head); else if (f) sfx.musicNote(head, f * 0.94); m.noteT = rand(0.9, 1.6); }
+  const moving = m.state === 'chase' || m.state === 'search' || m.state === 'wander' || m.state === 'grab';
+  if (ud.maskHead) ud.maskHead.agit = m.state === 'chase' || m.state === 'grab' ? 1 : moving ? 0.5 : 0.2;
+  m.bellT = (m.bellT ?? 1) - dt;
+  if (m.bellT <= 0 && moving) { sfx.bells(head, m.state === 'chase' ? 4 : 2); m.bellT = m.state === 'chase' ? rand(0.35, 0.7) : rand(1.6, 3.2); }
   m.breathT -= dt;
   if (m.breathT <= 0) { sfx.bigBreath(head, m.state === 'chase'); m.breathT = m.state === 'chase' ? rand(0.9, 1.3) : rand(2.4, 3.4); }
   setVoice(m, head, m.state === 'chase' || m.state === 'grab' ? 0.75 : 0.35, moon ? 1.8 : 0.5);
