@@ -768,23 +768,23 @@ const sfx = {
     const g = envGain(t, 0.02, 0.22, 1.6); lp.connect(g); out(g, 0.6);
     [207.6, 220, 311.1, 466.2, 493.9].forEach(f => { const o = osc('sawtooth', f * rand(0.995, 1.005)); o.connect(lp); o.start(t); o.stop(t + 1.8); });
   },
-  scream() {
-    if (!ac) return; const t = ac.currentTime;
+  scream(o = {}) {
+    if (!ac) return; const t = ac.currentTime, lo = o.lo ?? 280, hi = o.hi ?? 760, e0 = o.end0 ?? 180, e1 = o.end1 ?? 1100, vol = o.vol ?? 0.85, nz = o.noise ?? 0.5;
     const shaper = ac.createWaveShaper(), curve = new Float32Array(1024);
     for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; curve[i] = Math.tanh(x * 6); }
     shaper.curve = curve;
-    const g = ac.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.85, t + 0.02);
-    g.gain.setValueAtTime(0.85, t + 0.9); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
+    const g = ac.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.02);
+    g.gain.setValueAtTime(vol, t + 0.9); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
     shaper.connect(g); out(g, 0.5);
     for (let i = 0; i < 5; i++) {
-      const o = osc(i % 2 ? 'square' : 'sawtooth', rand(280, 760));
-      o.frequency.exponentialRampToValueAtTime(rand(180, 1100), t + 1.6);
+      const o = osc(i % 2 ? 'square' : 'sawtooth', rand(lo, hi));
+      o.frequency.exponentialRampToValueAtTime(rand(e0, e1), t + 1.6);
       const v = osc('sine', rand(18, 34)), vg = ac.createGain(); vg.gain.value = rand(25, 60);
       v.connect(vg); vg.connect(o.frequency);
       const og = ac.createGain(); og.gain.value = 0.18; o.connect(og); og.connect(shaper);
       o.start(t); v.start(t); o.stop(t + 1.9); v.stop(t + 1.9);
     }
-    const n = noiseSrc(), hp = filt('highpass', 1400), ng = ac.createGain(); ng.gain.value = 0.5;
+    const n = noiseSrc(), hp = filt('highpass', o.hp ?? 1400), ng = ac.createGain(); ng.gain.value = nz;
     n.connect(hp); hp.connect(ng); ng.connect(shaper); n.start(t); n.stop(t + 1.9);
   },
   whisper(pos) {
@@ -1020,6 +1020,21 @@ sfx.bossScream = () => {
   const sub = osc('sine', 90), se = envGain(t, 0.005, 0.9, 0.35); sub.frequency.exponentialRampToValueAtTime(32, t + 0.3); sub.connect(se); out(se, 0); sub.start(t); sub.stop(t + 0.4);
   for (const src of [jit, rn, br, n]) { src.start(t); src.stop(END); }
   pitch.start(t); pitch.stop(END + 0.02);
+};
+// 잡혔을 때: 괴물마다 다른 비명 (바로 귀앞에서)
+sfx.caught = type => {
+  if (!ac) return; const at = camera.position.clone();
+  switch (type) {
+    case 'stalker': sfx.scream({ lo: 700, hi: 1250, end0: 300, end1: 520, noise: 0.35 }); sfx.cry('stalker', at); break;                     // 여자가 찢어지게 지르다 흐느끼며 꺼진다
+    case 'listener': sfx.scream({ lo: 85, hi: 210, end0: 50, end1: 90, noise: 0.25, hp: 400 }); sfx.cry('listener', at); sfx.clicks(at, 9); break;   // 목구멍이 끓는 낮은 포효 + 딸깍딸깍
+    case 'watcher': sfx.crunch(at); sfx.giggle(at); sfx.scream({ lo: 1100, hi: 1600, end0: 1600, end1: 2400, noise: 0.15, vol: 0.6 }); sfx.crunch(at); break;   // 도자기 깨지는 소리 + 킥킥 + 유리 같은 고음
+    case 'crawler': sfx.cry('crawler', at); sfx.skitter(at); sfx.scream({ lo: 1900, hi: 2700, end0: 2200, end1: 3400, noise: 0.6, hp: 3000, vol: 0.6 }); break;   // 벌레가 찢어지게 우는 고음
+    case 'mass': sfx.cry('mass', at); sfx.squelch(at); sfx.squelch(at); sfx.scream({ lo: 60, hi: 150, end0: 40, end1: 70, noise: 0.3, hp: 200 }); break;    // 젖은 살덩이가 삼키는 신음
+    case 'shade': sfx.whisper(at); sfx.shriek(at); sfx.scream({ lo: 400, hi: 900, end0: 120, end1: 260, noise: 0.9, hp: 2400, vol: 0.7 }); break;         // 바람 같은 비명이 속삭임으로
+    case 'robot': sfx.glitchVoice(at); sfx.cry('robot', at); sfx.servo(at); sfx.scream({ lo: 320, hi: 640, end0: 60, end1: 120, noise: 0.4 }); break;     // 고장 난 노래 + 사이렌 웃음 + 전원 꺼지듯
+    case 'boss': sfx.bossScream(); break;
+    default: sfx.scream();
+  }
 };
 // 녹슨 경첩이 삐걱이는 소리 (문, 사물함)
 sfx.creak = pos => {
@@ -4430,7 +4445,7 @@ function updateWatcher(m, dt, dist, pp, pt) {
    ========================================================= */
 function triggerDeath(m) {
   S.state = 'dying'; S.deathT = 0; S.killer = m; S.bitDone = false;
-  if (m.type === 'boss' && m.mesh.userData.maskHead) sfx.bossScream(); else sfx.scream(); sfx.impact(); S.musicTarget = 0;
+  sfx.caught(m.type); sfx.impact(); S.musicTarget = 0;
   const pl = S.player, monsterMesh = m.mesh;
   const d = m.pos.clone().sub(new THREE.Vector3(pl.pos.x, 0, pl.pos.z)).setY(0).normalize();
   pl.yaw = Math.atan2(-d.x, -d.z); pl.pitch = 0.05;
