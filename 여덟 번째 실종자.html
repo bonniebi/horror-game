@@ -1855,7 +1855,7 @@ const MODEL_SPEC = {   // head: 머리를 따로 떼어 돌릴 수 있게 (cut =
   listener: { tile: 0.45, rough: 0.55, head: { cut: 0.62, r: 0.55 } },
   watcher: { tile: 0.5, rough: 0.28, head: { cut: 0.33, r: 0.25 } },
   crawler: { tile: 0.4, rough: 0.45, face: [0.2, 0.8] },
-  boss: { tile: 0.4, rough: 0.55, metal: 0.25, head: { cut: 0.4, r: 0.3 } },
+  boss: { tile: 0.4, rough: 0.42, metal: 0.72, head: { cut: 0.4, r: 0.3 } },
   robot: { tile: 0.4, rough: 0.5, metal: 0.35, head: { cut: 0.55, r: 0.38 }, eyes: true },
   mass: { tile: 0.5, rough: 0.28, face: [0.35, 0.75] }
 };
@@ -1933,10 +1933,14 @@ function modelTexture(key) {
     for (let i = 0; i < 24; i++) { let x = rand(0, s), y = rand(0, s); c.beginPath(); c.moveTo(x, y); for (let j = 0; j < 7; j++) { x += rand(-16, 16); y += rand(-16, 16); c.lineTo(x, y); } c.stroke(); }
     speckle(c, s, .15, 3000);
   });
-  if (key === 'boss') return canvasTex(256, (c, s) => {      // 누렇게 바랜 뼈 + 녹 + 그을음
-    c.fillStyle = '#a89f88'; c.fillRect(0, 0, s, s); speckle(c, s, .15, 6000);
-    stains(c, s, 26, 'rgba(95,48,20,.75)', .3); stains(c, s, 14, 'rgba(30,22,15,.7)', .25); stains(c, s, 5, 'rgba(80,4,4,.8)', .15);
-    crackLines(c, s, 10, 'rgba(20,14,10,.8)', 1.2, 8, 24);
+  if (key === 'boss') return canvasTex(512, (c, s) => {      // 녹슬고 긁힌 강철 골격 + 기름때 + 핏자국
+    c.fillStyle = '#8e8a84'; c.fillRect(0, 0, s, s);
+    c.globalAlpha = 0.2; for (let i = 0; i < 700; i++) { c.strokeStyle = Math.random() < 0.5 ? '#cfcac2' : '#35312d'; c.lineWidth = rand(0.5, 1.6); c.beginPath(); const x = rand(0, s), y = rand(0, s), a = rand(-0.5, 0.5) + (Math.random() < 0.5 ? 0 : Math.PI / 2), l = rand(8, 70); c.moveTo(x, y); c.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); c.stroke(); }
+    c.globalAlpha = 1; speckle(c, s, .16, 9000);
+    stains(c, s, 22, 'rgba(125,58,18,.65)', .16); stains(c, s, 10, 'rgba(75,32,10,.7)', .1); drips(c, s, 45, '115,48,12', 0);
+    stains(c, s, 20, 'rgba(25,22,20,.6)', .2); drips(c, s, 30, '20,16,14', s * 0.2);          // 기름때
+    stains(c, s, 7, 'rgba(70,4,4,.8)', .1); drips(c, s, 14, '75,0,0', s * 0.4);              // 핏자국
+    for (let i = 0; i < 160; i++) { const x = rand(0, s), y = rand(0, s); c.fillStyle = 'rgba(25,22,20,.8)'; c.beginPath(); c.arc(x, y, 2.6, 0, 7); c.fill(); c.fillStyle = 'rgba(210,205,195,.5)'; c.beginPath(); c.arc(x - 0.8, y - 0.8, 1.1, 0, 7); c.fill(); }   // 리벳
   });
   if (key === 'robot') return canvasTex(256, (c, s) => {     // 녹슨 강철 위에 들러붙은 썩은 털
     c.fillStyle = '#5a5853'; c.fillRect(0, 0, s, s); speckle(c, s, .2, 6000); stains(c, s, 20, 'rgba(110,52,18,.7)', .25);
@@ -1988,7 +1992,7 @@ async function loadModels() {
       bakeSurface(geo, spec.tile, H);
       if (key === 'boss') {   // 해골 머리는 잘라내고, 코드로 만든 '반쪽 가면' 머리를 단다
         const [sx, sy, sz] = JOINTS.boss.skull;
-        [, geo] = splitTris(geo, (x, y, z) => y > sy - 0.2 && Math.hypot(x - sx, (y - sy) * 0.9, z - sz) < 0.26);
+        [, geo] = splitTris(geo, (x, y, z) => (y > sy - 0.2 && Math.hypot(x - sx, (y - sy) * 0.9, z - sz) < 0.26) || (y > sy - 0.45 && y < sy && Math.hypot(x - sx, (y - sy) * 0.55, z - sz - 0.06) < 0.24));
       }
       if (key === 'stalker') {   // 긴 검은 머리: 얼굴 앞쪽만 남기고 머리 둘레와 등 뒤로 늘어진 부분을 검게
         let fx = 0, fz = -1e9, n = 0; const P2 = geo.attributes.position;
@@ -2210,7 +2214,7 @@ function makeMaskHead() {
   const inner = add(skull, new THREE.MeshBasicMaterial({ color: 0x070505, side: THREE.BackSide }), 0, 0, 0);
   const lid = add(headShell(90, steelR, steelCol, inHole), headSteel, 0, 0, 0);
   const LP = headPt(0.1, 0.97, -0.18); lid.geometry.translate(-LP.x, -LP.y, -LP.z); const lidG = new THREE.Group(); lidG.position.copy(LP); g.add(lidG); lidG.add(lid); lid.position.set(0, 0, 0);
-  lidG.rotation.set(1.05, 0.25, -0.2);
+  lidG.rotation.set(0.35, 0.3, -1.25);
   const gearMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0x8a6a40, metalness: 0.85, roughness: 0.45 });
   const gearsG = new THREE.Group(), GP = headPt(...HOLE, 0.8); gearsG.position.copy(GP); gearsG.lookAt(GP.clone().multiplyScalar(2)); g.add(gearsG);
   const gears = [[0, 0, 0.05, 14, 1], [0.072, 0.02, 0.03, 9, -14 / 9], [-0.05, 0.045, 0.026, 8, -14 / 8]].map(([x, y, r, n, sp]) => { const m = add(gearGeo(r, n, 0.012), gearMat, x, y, 0.01, gearsG); m.userData.sp = sp; return m; });
@@ -2237,16 +2241,6 @@ function makeMaskHead() {
     piv.quaternion.setFromUnitVectors(V(0, 1, 0), dir.clone().add(V(rand(-0.4, 0.4), rand(-0.2, 0.2), rand(-0.4, 0.4))).normalize()); g.add(piv);
     add(new THREE.CylinderGeometry(0.003, 0.003, 0.03, 6), sunMat, 0, 0.008, 0, piv); add(new THREE.CylinderGeometry(0.008, 0.008, 0.003, 10), sunMat, 0, 0.023, 0, piv);   // 몸통 + 납작한 못머리
   }
-  // 초승달 대신: 안쪽이 톱날인 녹슨 낫
-  const moonG = new THREE.Group(); moonG.position.set(0, -0.01, -0.07); g.add(moonG);
-  const cres = new THREE.Shape(), A0 = -1.35, A1 = 1.0, CN = 44;
-  for (let i = 0; i <= CN; i++) { const a = A0 + (A1 - A0) * i / CN; (i ? cres.lineTo : cres.moveTo).call(cres, Math.cos(a) * 0.3, Math.sin(a) * 0.3); }
-  for (let i = CN; i >= 0; i--) { const a = A0 + (A1 - A0) * i / CN, th = 0.075 * Math.sin(Math.PI * i / CN) + (i % 2 ? 0.018 : 0) * Math.sin(Math.PI * i / CN); cres.lineTo(Math.cos(a) * (0.3 - th), Math.sin(a) * (0.3 - th)); }
-  const moonMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0x7d838c, metalness: 0.55, roughness: 0.5, emissive: 0x000000 });
-  const moonGeo = new THREE.ExtrudeGeometry(cres, { depth: 0.008, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.003, bevelSegments: 1, curveSegments: 4 }); moonGeo.translate(0, 0, -0.004);
-  { const uv = moonGeo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 3 + 0.5, uv.getY(i) * 3 + 0.5); }
-  add(moonGeo, moonMat, 0, 0, 0, moonG);
-  for (let i = 1; i < 6; i++) { const a = A0 + (A1 - A0) * i / 6; add(new THREE.SphereGeometry(0.006, 8, 6), toothSteel, Math.cos(a) * 0.285, Math.sin(a) * 0.285, 0.008, moonG); }
   // 턱 기계: 양쪽 볼의 유압 피스톤(위는 두개골, 아래는 턱에 볼트로) + 턱 경첩의 맞물린 톱니
   const pistonMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0x5a544c, metalness: 0.8, roughness: 0.5 }), rodMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0x8c8a86, metalness: 0.9, roughness: 0.35 });
   const mechs = [];
@@ -2294,7 +2288,6 @@ function makeMaskHead() {
       pinGlow.material.color.setRGB(0.5 * on + t * (0.4 + 0.6 * pulse), 0.5 * on, 0.55 * on); pinGlow.scale.setScalar(0.05 + 0.05 * t);
       lensGlow.material.color.setRGB(0.8 * on, 0.85 * on, 0.95 * on);
       beam.intensity = 7 * on;
-      moonG.rotation.z = -t * 0.55; moonG.position.z = -0.07 + 0.05 * t; moonMat.emissive.setRGB(0.06 * t * (0.4 + 0.6 * pulse), 0, 0);
       const ag = this.agit || 0.3; gears.forEach(m => { m.rotation.z += dt * m.userData.sp * (1 + ag * 4); });
       cables.forEach(o => { o.cg.rotation.x = Math.sin(S.time * (5 + ag * 8) + o.ph) * 0.05 * ag; });
       sparks.forEach(o => { o.t -= dt; if (o.t <= 0) o.t = rand(0.6, 2.5) / (0.5 + ag); const on2 = o.t < 0.08; o.sp.scale.setScalar(on2 ? rand(0.03, 0.06) : 0.0001); });   // 파지직
