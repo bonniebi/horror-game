@@ -2051,7 +2051,11 @@ const EYE_R = [0.36, 0.12, 0.92], EYE_L = [-0.36, 0.12, 0.92];
 const GRIN = [[0.05, -0.47, 0.88], [-0.18, -0.46, 0.87], [-0.4, -0.37, 0.83], [-0.6, -0.2, 0.77], [-0.74, 0.0, 0.66]];
 const DENTS = Array.from({ length: 9 }, () => [rand(-1, 1), rand(-0.3, 1), rand(-1, 0.9), rand(0.06, 0.12), rand(0.02, 0.05)]);
 // 큰 형태 (가면과 강철이 함께 쓴다)
-function headBase(d) {
+// 얼굴 앞면만 조각한 두개골, 뒤·옆·정수리는 모서리가 둥근 네모 상자(기계 하우징)
+const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const boxR = d => Math.pow(Math.abs(d.x / 0.98) ** 12 + Math.abs(d.y / 1.04) ** 12 + Math.abs(d.z / 1.02) ** 12, -1 / 12);
+function headBase(d) { const w = sstep(0.05, 0.62, d.z); return boxR(d) * (1 - w) + faceBase(d) * w; }
+function faceBase(d) {
   return 1 + 0.2 * hd(d, 0, -0.5, 0.86, 0.42)                                   // 앞으로 튀어나온 주둥이
     + 0.09 * hd(d, 0.6, -0.2, 0.78, 0.2) + 0.09 * hd(d, -0.6, -0.2, 0.78, 0.2)  // 광대뼈
     + 0.07 * Math.exp(-(((d.y - 0.32) / 0.08) ** 2)) * Math.max(0, d.z) * (1 - 0.5 * Math.exp(-((d.x / 0.12) ** 2)))   // 눈썹 뼈
@@ -2076,6 +2080,11 @@ function steelDetail(d) {
     - 0.16 * Math.exp(-((d.x / 0.07) ** 2) - (((d.y + 0.15) / 0.13) ** 2)) * Math.max(0, d.z);   // 코 구멍
   for (const s of SEAMS) cav -= 0.028 * Math.exp(-((s(d) / 0.016) ** 2));
   for (const k of DENTS) cav -= k[4] * hd(d, k[0], k[1], k[2], k[3]);
+  if (Math.abs(d.x) > 0.55 && d.z < 0.25 && d.z > -0.75 && d.y > -0.35 && d.y < 0.45) cav -= 0.03 * Math.max(0, Math.sin(d.y * 70)) ** 6;   // 옆면 환기구 슬릿
+  if (d.z < -0.5) {                                                                // 뒷면: 환기구 + 패널선
+    if (Math.abs(d.x) < 0.4 && d.y > -0.45 && d.y < 0.05) cav -= 0.03 * Math.max(0, Math.sin(d.y * 60)) ** 6;
+    cav -= 0.025 * (Math.exp(-(((Math.abs(d.x) - 0.5) / 0.015) ** 2)) + Math.exp(-(((d.y - 0.25) / 0.015) ** 2)));
+  }
   let bump = 0; for (const r of RIVETS) bump += 0.03 * Math.exp(-((d.x - r[0]) ** 2 + (d.y - r[1]) ** 2 + (d.z - r[2]) ** 2) / 0.0005);
   bump += 0.004 * Math.sin(d.x * 61 + d.y * 13) * Math.sin(d.y * 57 - d.z * 23);  // 망치로 두드린 결
   return [cav, bump];
@@ -2201,7 +2210,7 @@ function makeMaskHead() {
     const rouge = hd(d, -0.5, -0.2, 0.84, 0.13); c[1] *= 1 - 0.35 * rouge; c[2] *= 1 - 0.3 * rouge;
     const grime = Math.max(0, Math.min(1, (d.x + 0.05) * 8)) * 0.35 + Math.max(0, -d.z) * 0.6; c[0] *= 1 - grime; c[1] *= 1 - grime; c[2] *= 1 - grime * 1.05;
   };
-  const maskGeo = headShell(150, maskR, maskCol, d => maskEdge(d) && d.y > MOUTH + 0.02 && d.z > -0.4 && d.y < 0.66 + 0.04 * Math.sin(d.x * 37) + 0.025 * Math.sin(d.z * 71)
+  const maskGeo = headShell(150, maskR, maskCol, d => maskEdge(d) && d.y > MOUTH + 0.02 && d.z > 0.12 + 0.05 * Math.sin(d.y * 41) && d.y < 0.66 + 0.04 * Math.sin(d.x * 37) + 0.025 * Math.sin(d.z * 71)
     && Math.hypot(d.x - EYE_L[0], d.y - EYE_L[1], d.z - EYE_L[2]) > 0.11 && !CHIPS.some(k => Math.hypot(d.x - k[0], d.y - k[1], d.z - k[2]) < k[3] * (0.8 + 0.4 * Math.sin(d.x * 90 + d.y * 70))));
   const HP = V(-0.165, 0.0, -0.05), hinge = new THREE.Group(); hinge.position.copy(HP); g.add(hinge);
   const mask = new THREE.Group(); mask.position.copy(HP).negate(); hinge.add(mask);
@@ -2241,36 +2250,35 @@ function makeMaskHead() {
     piv.quaternion.setFromUnitVectors(V(0, 1, 0), dir.clone().add(V(rand(-0.4, 0.4), rand(-0.2, 0.2), rand(-0.4, 0.4))).normalize()); g.add(piv);
     add(new THREE.CylinderGeometry(0.003, 0.003, 0.03, 6), sunMat, 0, 0.008, 0, piv); add(new THREE.CylinderGeometry(0.008, 0.008, 0.003, 10), sunMat, 0, 0.023, 0, piv);   // 몸통 + 납작한 못머리
   }
-  // 턱 기계: 양쪽 볼의 유압 피스톤(위는 두개골, 아래는 턱에 볼트로) + 턱 경첩의 맞물린 톱니
+  // 턱 기계: 엘리베이터처럼 위아래로만 움직인다. 양옆에 수직 유압 피스톤 + 톱니바퀴와 맞물린 톱니 막대(랙)
   const pistonMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0x5a544c, metalness: 0.8, roughness: 0.5 }), rodMat = new THREE.MeshStandardMaterial({ map: headSteelTex.map, color: 0x8c8a86, metalness: 0.9, roughness: 0.35 });
-  const mechs = [];
+  const mechs = [], JAW_DROP = 0.085, GR = 0.022;
   for (const sx of [-1, 1]) {
-    const A = V(sx * 0.152, 0.015, -0.1), Bl = V(sx * 0.142, -0.095, 0.045).sub(JP);
-    const barrel = add(new THREE.CylinderGeometry(0.016, 0.017, 0.06, 12), pistonMat, 0, 0, 0);
-    add(new THREE.CylinderGeometry(0.019, 0.019, 0.009, 12), pistonMat, 0, 0.026, 0, barrel); add(new THREE.CylinderGeometry(0.019, 0.019, 0.009, 12), pistonMat, 0, -0.026, 0, barrel);
-    const rod = add(new THREE.CylinderGeometry(0.008, 0.008, 0.07, 10), rodMat, 0, 0, 0);
-    const plate = (p, par) => { const pl = add(new THREE.BoxGeometry(0.008, 0.034, 0.03), pistonMat, p.x - sx * 0.004, p.y, p.z, par); [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([u, v]) => add(new THREE.SphereGeometry(0.0035, 6, 4), toothSteel, sx * 0.005, u * 0.012, v * 0.01, pl)); return pl; };
-    plate(A, g); plate(Bl, jaw);                                                                     // 볼트로 박은 받침판
-    const hose = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([A.clone().add(V(0, 0.02, -0.01)), V(sx * 0.16, 0.06, -0.12), V(sx * 0.12, 0.1, -0.16)]), 10, 0.004, 5), P.wire); g.add(hose);
-    // 경첩에서 턱 앞까지 이어진 두꺼운 쇠 턱뼈대
-    const Hl = V(sx * 0.15, 0, 0), Fl = V(sx * 0.12, -0.11, 0.13).sub(JP), arm = Fl.clone().sub(Hl), armL = arm.length();
-    const bar = add(new THREE.BoxGeometry(0.012, armL, 0.022), pistonMat, (Hl.x + Fl.x) / 2, (Hl.y + Fl.y) / 2, (Hl.z + Fl.z) / 2, jaw); bar.quaternion.setFromUnitVectors(V(0, 1, 0), arm.normalize());
-    for (let k = 1; k < 4; k++) add(new THREE.SphereGeometry(0.004, 6, 4), toothSteel, sx * 0.007, (k / 4 - 0.5) * armL, 0, bar);
-    const H = V(sx * 0.158, JP.y, JP.z);
-    const gBig = add(gearGeo(0.032, 12, 0.01), gearMat, H.x, H.y, H.z), gSmall = add(gearGeo(0.019, 8, 0.01), gearMat, H.x + sx * 0.002, H.y + 0.038, H.z + 0.028);
-    gBig.rotation.y = gSmall.rotation.y = sx * Math.PI / 2; gBig.position.x -= sx * 0.005; gSmall.position.x -= sx * 0.005;
-    add(new THREE.CylinderGeometry(0.008, 0.008, 0.02, 10), toothSteel, H.x, H.y, H.z).rotation.z = Math.PI / 2;   // 경첩 축
-    mechs.push({ A, Bl, barrel, rod, gBig, gSmall, sx });
+    const X = sx * 0.168;
+    // 고정된 쪽 (머리): 피스톤 통 + 받침판 + 톱니바퀴
+    add(new THREE.CylinderGeometry(0.015, 0.015, 0.07, 12), pistonMat, X, -0.035, -0.075);
+    add(new THREE.CylinderGeometry(0.018, 0.018, 0.008, 12), pistonMat, X, -0.0, -0.075); add(new THREE.CylinderGeometry(0.018, 0.018, 0.008, 12), pistonMat, X, -0.07, -0.075);
+    const plate = add(new THREE.BoxGeometry(0.008, 0.09, 0.075), pistonMat, X - sx * 0.008, -0.03, -0.045);
+    [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([u, v]) => add(new THREE.SphereGeometry(0.0035, 6, 4), toothSteel, sx * 0.005, u * 0.038, v * 0.03, plate));
+    const gp = new THREE.Group(); gp.position.set(X + sx * 0.004, -0.055, 0.0); gp.rotation.y = Math.PI / 2; g.add(gp);
+    const gear = add(gearGeo(GR, 10, 0.009), gearMat, 0, 0, -0.0045, gp);
+    add(new THREE.CylinderGeometry(0.006, 0.006, 0.02, 10), toothSteel, X, -0.055, 0).rotation.z = Math.PI / 2;      // 축
+    // 레일 (머리에 고정, 턱이 이걸 따라 미끄러진다)
+    add(new THREE.BoxGeometry(0.008, 0.16, 0.01), pistonMat, X + sx * 0.002, -0.1, 0.05);
+    // 움직이는 쪽 (턱): 피스톤 막대 + 톱니 막대
+    add(new THREE.CylinderGeometry(0.0075, 0.0075, 0.1, 10), rodMat, X - JP.x, -0.115 - JP.y, -0.075 - JP.z, jaw);
+    add(new THREE.BoxGeometry(0.02, 0.012, 0.024), pistonMat, X - JP.x, -0.165 - JP.y, -0.075 - JP.z, jaw);    // 막대 끝 고정쇠
+    const rack = add(new THREE.BoxGeometry(0.009, 0.15, 0.008), pistonMat, X - JP.x, -0.09 - JP.y, GR + 0.004 - JP.z, jaw);
+    for (let k = 0; k < 14; k++) add(new THREE.BoxGeometry(0.009, 0.005, 0.006), pistonMat, 0, -0.07 + k * 0.0105, -0.006, rack);   // 랙 톱니
+    add(new THREE.BoxGeometry(0.01, 0.03, 0.05), pistonMat, X - JP.x - sx * 0.004, -0.15 - JP.y, 0.03 - JP.z, jaw);   // 랙과 턱을 잇는 브래킷
+    mechs.push({ gear, sx });
   }
-  const _b = new THREE.Vector3(), _d = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+  let drop = 0;
   const driveJaw = () => {
-    jaw.rotation.x = Math.round(jaw.rotation.x * 28) / 28;                       // 기계라 매끈하지 않고 딸깍딸깍 끊겨 움직인다
-    for (const m of mechs) {
-      _b.copy(m.Bl).applyEuler(jaw.rotation).add(jaw.position); _d.copy(_b).sub(m.A); const L = _d.length(); _d.divideScalar(L);
-      m.barrel.position.copy(m.A).addScaledVector(_d, 0.032); m.barrel.quaternion.setFromUnitVectors(_up, _d);
-      m.rod.position.copy(_b).addScaledVector(_d, -0.035); m.rod.quaternion.setFromUnitVectors(_up, _d);
-      m.gBig.rotation.x = jaw.rotation.x * 2.4 * m.sx; m.gSmall.rotation.x = -jaw.rotation.x * 2.4 * (12 / 8) * m.sx;
-    }
+    const want = Math.max(0, Math.min(1, jaw.rotation.x / 0.9)) * JAW_DROP;   // 바깥 코드는 '얼마나 벌릴지'를 회전값으로 준다 → 수직 하강으로 바꾼다
+    drop = Math.round(want / 0.006) * 0.006;                                  // 딸깍딸깍 끊겨 내려간다
+    jaw.rotation.x = 0; jaw.position.set(JP.x, JP.y - drop, JP.z);
+    for (const m of mechs) m.gear.rotation.z = -drop / GR * m.sx;
   };
   // 하얀 눈빛: 손전등처럼 앞을 훑는다
   const beam = new THREE.SpotLight(0xdfe8ff, 0, 13, 0.32, 0.6, 1.5); beam.position.copy(eyeR); const bt = new THREE.Object3D(); bt.position.set(eyeR.x, -0.4, 2); g.add(beam, bt); beam.target = bt;
