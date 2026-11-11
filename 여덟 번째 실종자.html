@@ -966,27 +966,33 @@ sfx.radio = pos => {
 };
 // 기워진 것의 잡아먹는 비명: "끼에에에에에에에에—" 같은 높이로 끊김 없이 길게 이어지는 찢어지는 기계 목소리
 sfx.bossScream = () => {
-  if (!ac) return; const t = ac.currentTime, END = t + 1.75;
-  const bus = ac.createGain(); bus.gain.setValueAtTime(1, t); bus.gain.setValueAtTime(1, END - 0.35); bus.gain.linearRampToValueAtTime(0, END); out(bus, 0.2);   // 끝에서 자연스럽게 사라진다
-  const sh = gritShaper(); sh.connect(bus);
-  // 성대: 톱니파 셋 (살짝 어긋난 음) → 모음 필터 "이/에" → 찌그러뜨림
-  const vf1 = filt('bandpass', 3400, 4), vf2 = filt('bandpass', 1900, 3), vdry = ac.createGain(); vdry.gain.value = 0.35;
-  const gate = ac.createGain(); gate.gain.setValueAtTime(0, t);
-  [vf1, vf2, vdry].forEach(n => n.connect(gate)); gate.connect(sh);
-  const pitch = ac.createConstantSource(); pitch.offset.setValueAtTime(1000, t); pitch.offset.exponentialRampToValueAtTime(1700, t + 0.04);   // 처음 한 번 치솟고 그 높이 그대로 쭉
-  
-  for (const det of [1, 0.5]) {                                                  // 정확히 한 옥타브 차이 → 맥놀이(떨림) 없음
-    const o = osc('sawtooth', 0); o.frequency.value = 0; const m = ac.createGain(); m.gain.value = det; pitch.connect(m); m.connect(o.frequency);
-    o.connect(vf1); o.connect(vf2); o.connect(vdry); o.start(t); o.stop(END + 0.02);
+  if (!ac) return; const t = ac.currentTime, END = t + 1.75, F0 = 1500;
+  const bus = ac.createGain(); bus.gain.setValueAtTime(1, t); bus.gain.setValueAtTime(1, END - 0.35); bus.gain.linearRampToValueAtTime(0, END); out(bus, 0.25);
+  const clip = ac.createWaveShaper(), cc = new Float32Array(1024); for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; cc[i] = Math.tanh(x * 6); } clip.curve = cc;   // 목이 찢어지게 찌그러진 소리
+  const post = ac.createGain(); post.gain.value = 0.9; clip.connect(post); post.connect(bus);
+  // 입을 쩍 벌린 "이애애" 모음: 목청 울림(포먼트) 네 개를 나란히
+  const formants = ac.createGain(); formants.connect(clip);
+  for (const [f, q, g] of [[1000, 5, 1.0], [2100, 7, 0.9], [3100, 8, 0.6], [4300, 9, 0.35]]) { const bp = filt('bandpass', f, q), gg = ac.createGain(); gg.gain.value = g; bp.connect(gg); gg.connect(formants); formants[`in${f}`] = bp; }
+  const toFormants = node => [1000, 2100, 3100, 4300].forEach(f => node.connect(formants[`in${f}`]));
+  // 성대: 톱니파(기본음) + 한 옥타브 아래(굵기). 불규칙한 미세 흔들림(지글거림)은 규칙적인 떨림이 아니라 거친 목소리로 들린다
+  const pitch = ac.createConstantSource(); pitch.offset.setValueAtTime(F0 * 0.6, t); pitch.offset.exponentialRampToValueAtTime(F0, t + 0.06); pitch.offset.linearRampToValueAtTime(F0 * 1.04, t + 0.9); pitch.offset.linearRampToValueAtTime(F0 * 0.97, END);
+  const jit = noiseSrc(), jlp = filt('lowpass', 45, 0.7), jg = ac.createGain(); jg.gain.value = F0 * 0.05; jit.connect(jlp); jlp.connect(jg);
+  const voice = ac.createGain(); voice.gain.setValueAtTime(0, t); voice.gain.linearRampToValueAtTime(1, t + 0.03);
+  for (const [mul, lvl] of [[1, 1], [0.5, 0.45]]) {
+    const o = osc('sawtooth', 0); o.frequency.value = 0; const m = ac.createGain(); m.gain.value = mul; pitch.connect(m); m.connect(o.frequency);
+    const jm = ac.createGain(); jm.gain.value = mul; jg.connect(jm); jm.connect(o.frequency);
+    const lg = ac.createGain(); lg.gain.value = lvl; o.connect(lg); lg.connect(voice); o.start(t); o.stop(END + 0.02);
   }
-  gate.gain.linearRampToValueAtTime(1, t + 0.03);   // 끊기지 않고 쭉
-  vf1.frequency.setValueAtTime(3600, t); vf1.frequency.linearRampToValueAtTime(3400, t + 0.3);
-  // 쇠가 긁히는 고음 + 찢어지는 잡음 + 첫 순간 쿵
-  const sq = osc('square', 3400);
-  const sqE = envGain(t, 0.02, 0.12, 1.0), hpq = filt('highpass', 2500); sq.connect(hpq); hpq.connect(sqE); sqE.connect(bus); sq.start(t); sq.stop(END);
-  const n = noiseSrc(), nb = filt('bandpass', 4200, 1.2), ne = envGain(t, 0.01, 0.5, 0.35); n.connect(nb); nb.connect(ne); ne.connect(bus); n.start(t); n.stop(END);
-  const n2 = noiseSrc(), nb2 = filt('bandpass', 2000, 2), ne2 = ac.createGain(); ne2.gain.setValueAtTime(0.0001, t); ne2.gain.exponentialRampToValueAtTime(0.2, t + 0.5); n2.connect(nb2); nb2.connect(ne2); ne2.connect(bus); n2.start(t); n2.stop(END);
+  // 거친 목: 70~200Hz의 불규칙한 진폭 흔들림 (쇳소리 섞인 rasp)
+  const rough = ac.createGain(); rough.gain.value = 0.6; voice.connect(rough); toFormants(rough);
+  const rn = noiseSrc(), rbp = filt('bandpass', 120, 0.8), rg = ac.createGain(); rg.gain.value = 0.5; rn.connect(rbp); rbp.connect(rg); rg.connect(rough.gain);
+  // 숨이 섞인 바람 소리 (같은 모음 울림을 통과)
+  const br = noiseSrc(), bhp = filt('highpass', 900), bg = ac.createGain(); bg.gain.setValueAtTime(0.0001, t); bg.gain.exponentialRampToValueAtTime(0.28, t + 0.05); bhp.connect(bg); br.connect(bhp); toFormants(bg);
+  // 쇠가 긁히는 고음 + 첫 순간 찢어지는 잡음 + 쿵
+  const sq = osc('square', 3400), sqE = envGain(t, 0.02, 0.06, 1.2), hpq = filt('highpass', 2500); sq.connect(hpq); hpq.connect(sqE); sqE.connect(bus); sq.start(t); sq.stop(END);
+  const n = noiseSrc(), nb = filt('bandpass', 4200, 1.2), ne = envGain(t, 0.01, 0.5, 0.3); n.connect(nb); nb.connect(ne); ne.connect(bus);
   const sub = osc('sine', 90), se = envGain(t, 0.005, 0.9, 0.35); sub.frequency.exponentialRampToValueAtTime(32, t + 0.3); sub.connect(se); out(se, 0); sub.start(t); sub.stop(t + 0.4);
+  for (const src of [jit, rn, br, n]) { src.start(t); src.stop(END); }
   pitch.start(t); pitch.stop(END + 0.02);
 };
 // 녹슨 경첩이 삐걱이는 소리 (문, 사물함)
