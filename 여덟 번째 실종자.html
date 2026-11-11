@@ -970,24 +970,24 @@ sfx.bossScream = () => {
   const bus = ac.createGain(); bus.gain.setValueAtTime(1, t); bus.gain.setValueAtTime(1, END - 0.35); bus.gain.linearRampToValueAtTime(0, END); out(bus, 0.2);   // 끝에서 자연스럽게 사라진다
   const sh = gritShaper(); sh.connect(bus);
   // 성대: 톱니파 셋 (살짝 어긋난 음) → 모음 필터 "이/에" → 찌그러뜨림
-  const vf1 = filt('bandpass', 2600, 4), vf2 = filt('bandpass', 1400, 3), vdry = ac.createGain(); vdry.gain.value = 0.35;
+  const vf1 = filt('bandpass', 3400, 4), vf2 = filt('bandpass', 1900, 3), vdry = ac.createGain(); vdry.gain.value = 0.35;
   const gate = ac.createGain(); gate.gain.setValueAtTime(0, t);
   [vf1, vf2, vdry].forEach(n => n.connect(gate)); gate.connect(sh);
-  const pitch = ac.createConstantSource(); pitch.offset.setValueAtTime(700, t); pitch.offset.exponentialRampToValueAtTime(1150, t + 0.04);   // 처음 한 번 치솟고 그 높이 그대로 쭉
-  const vib = osc('sine', 14), vibG = ac.createGain(); vibG.gain.setValueAtTime(25, t); vib.connect(vibG);
-  for (const det of [1, 1.013, 0.497]) {
-    const o = osc('sawtooth', 0); o.frequency.value = 0; const m = ac.createGain(); m.gain.value = det; pitch.connect(m); m.connect(o.frequency); vibG.connect(o.frequency);
+  const pitch = ac.createConstantSource(); pitch.offset.setValueAtTime(1000, t); pitch.offset.exponentialRampToValueAtTime(1700, t + 0.04);   // 처음 한 번 치솟고 그 높이 그대로 쭉
+  
+  for (const det of [1, 0.5]) {                                                  // 정확히 한 옥타브 차이 → 맥놀이(떨림) 없음
+    const o = osc('sawtooth', 0); o.frequency.value = 0; const m = ac.createGain(); m.gain.value = det; pitch.connect(m); m.connect(o.frequency);
     o.connect(vf1); o.connect(vf2); o.connect(vdry); o.start(t); o.stop(END + 0.02);
   }
   gate.gain.linearRampToValueAtTime(1, t + 0.03);   // 끊기지 않고 쭉
-  vf1.frequency.setValueAtTime(3000, t); vf1.frequency.linearRampToValueAtTime(2600, t + 0.3);
+  vf1.frequency.setValueAtTime(3600, t); vf1.frequency.linearRampToValueAtTime(3400, t + 0.3);
   // 쇠가 긁히는 고음 + 찢어지는 잡음 + 첫 순간 쿵
-  const sq = osc('square', 3400), sqF = osc('sine', 37), sqG = ac.createGain(); sqG.gain.value = 900; sqF.connect(sqG); sqG.connect(sq.frequency);
-  const sqE = envGain(t, 0.02, 0.12, 1.0), hpq = filt('highpass', 2500); sq.connect(hpq); hpq.connect(sqE); sqE.connect(bus); sq.start(t); sqF.start(t); sq.stop(END); sqF.stop(END);
+  const sq = osc('square', 3400);
+  const sqE = envGain(t, 0.02, 0.12, 1.0), hpq = filt('highpass', 2500); sq.connect(hpq); hpq.connect(sqE); sqE.connect(bus); sq.start(t); sq.stop(END);
   const n = noiseSrc(), nb = filt('bandpass', 4200, 1.2), ne = envGain(t, 0.01, 0.5, 0.35); n.connect(nb); nb.connect(ne); ne.connect(bus); n.start(t); n.stop(END);
   const n2 = noiseSrc(), nb2 = filt('bandpass', 2000, 2), ne2 = ac.createGain(); ne2.gain.setValueAtTime(0.0001, t); ne2.gain.exponentialRampToValueAtTime(0.2, t + 0.5); n2.connect(nb2); nb2.connect(ne2); ne2.connect(bus); n2.start(t); n2.stop(END);
   const sub = osc('sine', 90), se = envGain(t, 0.005, 0.9, 0.35); sub.frequency.exponentialRampToValueAtTime(32, t + 0.3); sub.connect(se); out(se, 0); sub.start(t); sub.stop(t + 0.4);
-  pitch.start(t); vib.start(t); pitch.stop(END + 0.02); vib.stop(END + 0.02);
+  pitch.start(t); pitch.stop(END + 0.02);
 };
 // 녹슨 경첩이 삐걱이는 소리 (문, 사물함)
 sfx.creak = pos => {
